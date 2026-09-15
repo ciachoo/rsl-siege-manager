@@ -24,6 +24,7 @@ from app.api.post_priority_config import router as post_priority_config_router
 from app.api.post_suggestions import router as post_suggestions_router
 from app.api.posts import router as posts_router
 from app.api.reference import router as reference_router
+from app.api.scanner import router as scanner_router
 from app.api.siege_members import router as siege_members_router
 from app.api.sieges import router as sieges_router
 from app.api.validation import router as validation_router
@@ -121,6 +122,9 @@ app.include_router(health_router, prefix="/api")
 app.include_router(version_router, prefix="/api")
 app.include_router(config_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+
+# Scanner route has its own credential dependency; normal auth bypass never applies.
+app.include_router(scanner_router, prefix="/api")
 
 # Protected routes — require authentication
 _auth_deps = [Depends(get_current_user)]

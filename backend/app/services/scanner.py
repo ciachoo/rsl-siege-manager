@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scanner import ObservedBuilding, ObservedPost, ScannerIdentity, ScannerSnapshot
@@ -17,6 +18,13 @@ class SnapshotConflict(ValueError):
 
 
 async def record_snapshot(session: AsyncSession, envelope: SnapshotEnvelope) -> ScannerSnapshot:
+    snapshot, _ = await record_snapshot_with_status(session, envelope)
+    return snapshot
+
+
+async def record_snapshot_with_status(
+    session: AsyncSession, envelope: SnapshotEnvelope
+) -> tuple[ScannerSnapshot, bool]:
     """Persist a batch without touching Manager planning tables.
 
     Caller must establish scanner identity/auth before invoking this internal service.
@@ -37,7 +45,7 @@ async def record_snapshot(session: AsyncSession, envelope: SnapshotEnvelope) -> 
     if existing is not None:
         if existing.content_digest != digest:
             raise SnapshotConflict("snapshot identity reused with different content")
-        return existing
+        return existing, True
 
     if envelope.siege_id is not None and await session.get(Siege, envelope.siege_id) is None:
         raise ValueError("explicit siege_id does not exist")
@@ -62,10 +70,26 @@ async def record_snapshot(session: AsyncSession, envelope: SnapshotEnvelope) -> 
         content_digest=digest,
     )
     session.add(snapshot)
-    await session.flush()
-    for row in envelope.buildings or []:
-        session.add(ObservedBuilding(snapshot_id=snapshot.id, **row.model_dump()))
-    for row in envelope.posts or []:
-        session.add(ObservedPost(snapshot_id=snapshot.id, **row.model_dump()))
-    await session.commit()
-    return snapshot
+    try:
+        await session.flush()
+        for row in envelope.buildings or []:
+            session.add(ObservedBuilding(snapshot_id=snapshot.id, **row.model_dump()))
+        for row in envelope.posts or []:
+            session.add(ObservedPost(snapshot_id=snapshot.id, **row.model_dump()))
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raced = (
+            await session.execute(
+                select(ScannerSnapshot).where(
+                    ScannerSnapshot.scanner_id == envelope.scanner_id,
+                    ScannerSnapshot.snapshot_id == envelope.snapshot_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if raced is None:
+            raise
+        if raced.content_digest != digest:
+            raise SnapshotConflict("snapshot identity reused with different content") from None
+        return raced, True
+    return snapshot, False

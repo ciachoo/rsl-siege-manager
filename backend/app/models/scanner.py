@@ -20,10 +20,18 @@ from app.db.base import Base
 
 class ScannerIdentity(Base):
     __tablename__ = "scanner_identity"
+    __table_args__ = (
+        UniqueConstraint("credential_selector", name="uq_scanner_credential_selector"),
+    )
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    credential_selector: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    credential_verifier: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    credential_revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     snapshots: Mapped[list["ScannerSnapshot"]] = relationship(back_populates="scanner")
 
