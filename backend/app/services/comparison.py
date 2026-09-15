@@ -13,20 +13,16 @@ from app.schemas.comparison import ComparisonResult, MemberDiff, PositionKey
 async def _load_assignments(session: AsyncSession, siege_id: int) -> dict[int, list[PositionKey]]:
     """Return {member_id: [PositionKey, ...]} for non-reserve, non-disabled assigned positions.
 
-    Only positions belonging to active members are included.  Assignments copied from a cloned
-    siege may reference members who are (or have since become) inactive; those are excluded here
-    so they never surface in the comparison view.
+    Historical assignments remain included if a member later becomes inactive.
     """
     result = await session.execute(
         select(Position, BuildingGroup, Building)
         .join(BuildingGroup, Position.building_group_id == BuildingGroup.id)
         .join(Building, BuildingGroup.building_id == Building.id)
-        .join(Member, Position.member_id == Member.id)
         .where(Building.siege_id == siege_id)
         .where(Position.member_id.is_not(None))
         .where(Position.is_reserve.is_(False))
         .where(Position.is_disabled.is_(False))
-        .where(Member.is_active.is_(True))
     )
 
     assignments: dict[int, list[PositionKey]] = {}
@@ -50,10 +46,16 @@ async def _load_member_names(session: AsyncSession, member_ids: set[int]) -> dic
 
 
 async def get_most_recent_completed(session: AsyncSession, exclude_siege_id: int) -> Siege | None:
+    target_result = await session.execute(select(Siege).where(Siege.id == exclude_siege_id))
+    target = target_result.scalar_one_or_none()
+    if target is None or target.date is None:
+        return None
+
     result = await session.execute(
         select(Siege)
         .where(Siege.status == SiegeStatus.complete)
         .where(Siege.id != exclude_siege_id)
+        .where(Siege.date < target.date)
         .order_by(Siege.date.desc(), Siege.id.desc())
         .limit(1)
     )

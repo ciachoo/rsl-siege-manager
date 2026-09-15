@@ -273,14 +273,8 @@ async def test_compare_reserve_positions_excluded():
 
 
 @pytest.mark.asyncio
-async def test_inactive_member_excluded_from_comparison():
-    """Inactive members with assignments (e.g. from a cloned siege) must not appear in results.
-
-    The fix adds a join to Member + filter on is_active=True inside _load_assignments.
-    We verify this by:
-    1. Capturing the SQL statement and asserting is_active appears in the WHERE clause.
-    2. Simulating the filtered result (inactive member absent) and asserting they don't surface.
-    """
+async def test_historical_assignment_query_does_not_filter_current_member_activity():
+    """Stored historical assignments must not depend on current Member.is_active."""
     from app.services.comparison import _load_assignments
 
     captured_stmts = []
@@ -298,25 +292,19 @@ async def test_inactive_member_excluded_from_comparison():
 
     assert len(captured_stmts) == 1, "Expected exactly one query from _load_assignments"
     stmt_str = str(captured_stmts[0].compile(compile_kwargs={"literal_binds": True}))
-    assert (
-        "is_active" in stmt_str
-    ), "Query must filter on Member.is_active to exclude inactive members from comparison"
+    assert "is_active" not in stmt_str
 
 
 @pytest.mark.asyncio
-async def test_inactive_member_rows_absent_from_comparison_result():
-    """Integration-style: inactive member rows filtered by query do not appear in result.
-
-    When a siege is cloned, assignments are copied for all members including inactive ones.
-    The comparison service must exclude those members.
-    Simulate by returning rows only for the active member (as the DB would after filtering).
-    """
+async def test_inactive_member_with_historical_assignments_remains_in_comparison():
+    """An inactive member's stored assignments remain part of the diff."""
     active_rows = _build_siege_assignments(1, [(1, 1, BuildingType.stronghold, 1, 1)])
     inactive_rows = _build_siege_assignments(
         1, [(2, 1, BuildingType.stronghold, 1, 2)]
     )  # member_id=2, inactive
 
     active_member = SimpleNamespace(id=1, name="Alice", is_active=True)
+    inactive_member = SimpleNamespace(id=2, name="Bob", is_active=False)
 
     call_count = 0
 
@@ -324,13 +312,11 @@ async def test_inactive_member_rows_absent_from_comparison_result():
         nonlocal call_count
         result = MagicMock()
         if call_count == 0:
-            # Siege A: only active member rows (inactive filtered by is_active=True join)
-            result.all.return_value = list(active_rows)
+            result.all.return_value = list(active_rows) + list(inactive_rows)
         elif call_count == 1:
-            # Siege B: same
-            result.all.return_value = list(active_rows)
+            result.all.return_value = list(active_rows) + list(inactive_rows)
         else:
-            result.scalars.return_value.all.return_value = [active_member]
+            result.scalars.return_value.all.return_value = [active_member, inactive_member]
         call_count += 1
         return result
 
@@ -340,8 +326,7 @@ async def test_inactive_member_rows_absent_from_comparison_result():
     result = await compare_sieges(session, siege_a_id=1, siege_b_id=2)
     member_ids = [m.member_id for m in result.members]
     assert 1 in member_ids, "Active member should appear in comparison"
-    assert 2 not in member_ids, "Inactive member must not appear in comparison"
-    _ = inactive_rows  # referenced to show intent; would be returned without the fix
+    assert 2 in member_ids, "Historical assignment must remain after deactivation"
 
 
 @pytest.mark.asyncio
@@ -362,12 +347,17 @@ async def test_get_most_recent_completed_returns_none():
 
 @pytest.mark.asyncio
 async def test_get_most_recent_completed_returns_siege():
-    """Returns the siege when one exists."""
+    """Returns the latest completed siege before the dated target."""
+    target = _make_siege(id=1)
     siege = _make_siege(id=5, status=SiegeStatus.complete)
+    siege.date = datetime.date(2026, 3, 19)
+    call_count = 0
 
     async def fake_execute(stmt):
+        nonlocal call_count
         result = MagicMock()
-        result.scalar_one_or_none.return_value = siege
+        result.scalar_one_or_none.return_value = target if call_count == 0 else siege
+        call_count += 1
         return result
 
     session = AsyncMock()
