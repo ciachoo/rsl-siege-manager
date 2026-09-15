@@ -106,6 +106,42 @@ async def test_auth_disabled_does_not_bypass_scanner_auth_and_identity_is_bound(
 
 
 @pytest.mark.asyncio
+async def test_human_bot_and_scanner_credentials_remain_separate(db, monkeypatch):
+    import jwt
+
+    from app.config import settings
+
+    _, scanner_secret = await provision_scanner(db, "scanner-one")
+    monkeypatch.setattr(settings, "auth_disabled", False)
+    monkeypatch.setattr(settings, "bot_service_token", "bot-example")
+    monkeypatch.setattr(settings, "session_secret", "test-session-secret")
+    human_token = jwt.encode(
+        {
+            "typ": "manager-user-v2",
+            "sub": "1",
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + timedelta(hours=1),
+        },
+        settings.session_secret,
+        algorithm="HS256",
+    )
+    assert (await post(payload(), "bot-example")).status_code == 401
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        client.cookies.set("session", human_token)
+        assert (
+            await client.post(
+                "/api/scanner/snapshots",
+                json=payload(),
+                headers={"Origin": settings.allowed_origins.split(",")[0].strip()},
+            )
+        ).status_code == 401
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (
+            await client.get("/api/auth/me", headers={"Authorization": f"Bearer {scanner_secret}"})
+        ).status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_validation_conflict_and_unknown_semantics(db):
     _, secret = await provision_scanner(db, "scanner-one")
     body = payload()

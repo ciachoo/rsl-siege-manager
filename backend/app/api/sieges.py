@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_manager
 from app.models.enums import SiegeStatus
 from app.schemas.siege import SiegeCreate, SiegeResponse, SiegeUpdate
 from app.services import sieges as sieges_service
@@ -24,7 +25,12 @@ async def list_sieges(
     return results
 
 
-@router.post("/sieges", response_model=SiegeResponse, status_code=201)
+@router.post(
+    "/sieges",
+    response_model=SiegeResponse,
+    status_code=201,
+    dependencies=[Depends(require_manager)],
+)
 async def create_siege(
     data: SiegeCreate,
     db: AsyncSession = Depends(get_db),
@@ -48,7 +54,9 @@ async def get_siege(
     return response
 
 
-@router.put("/sieges/{siege_id}", response_model=SiegeResponse)
+@router.put(
+    "/sieges/{siege_id}", response_model=SiegeResponse, dependencies=[Depends(require_manager)]
+)
 async def update_siege(
     siege_id: int,
     data: SiegeUpdate,
@@ -61,7 +69,7 @@ async def update_siege(
     return response
 
 
-@router.delete("/sieges/{siege_id}", status_code=204)
+@router.delete("/sieges/{siege_id}", status_code=204, dependencies=[Depends(require_manager)])
 async def delete_siege(
     siege_id: int,
     db: AsyncSession = Depends(get_db),

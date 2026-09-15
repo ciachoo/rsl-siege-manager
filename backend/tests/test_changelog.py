@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.config import settings
 from app.db.session import get_db
 from app.main import app
 
@@ -33,6 +34,7 @@ def _make_jwt(member_id: int) -> str:
     import jwt
 
     payload = {
+        "typ": "manager-user-v2",
         "sub": str(member_id),
         "name": "TestUser",
         "iat": datetime.datetime.now(UTC),
@@ -60,6 +62,10 @@ def _make_member(
         role=SimpleNamespace(value="advanced"),
         is_active=True,
         last_seen_changelog_at=last_seen_changelog_at,
+        member_id=id,
+        display_name=name,
+        discord_user_id="123456789012345678",
+        app_role="viewer",
     )
 
 
@@ -128,7 +134,10 @@ async def test_mark_seen_then_get_status_returns_timestamp(monkeypatch):
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             client.cookies.set("session", token)
-            post_response = await client.post("/api/changelog/mark-seen")
+            post_response = await client.post(
+                "/api/changelog/mark-seen",
+                headers={"Origin": settings.allowed_origins.split(",")[0].strip()},
+            )
             get_response = await client.get("/api/changelog/status")
     finally:
         app.dependency_overrides.pop(get_db, None)
@@ -168,8 +177,14 @@ async def test_mark_seen_twice_is_idempotent(monkeypatch):
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             client.cookies.set("session", token)
-            first = await client.post("/api/changelog/mark-seen")
-            second = await client.post("/api/changelog/mark-seen")
+            first = await client.post(
+                "/api/changelog/mark-seen",
+                headers={"Origin": settings.allowed_origins.split(",")[0].strip()},
+            )
+            second = await client.post(
+                "/api/changelog/mark-seen",
+                headers={"Origin": settings.allowed_origins.split(",")[0].strip()},
+            )
     finally:
         app.dependency_overrides.pop(get_db, None)
 

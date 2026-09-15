@@ -33,7 +33,7 @@ class TestSettingsDefaults:
             "environment": "development",
         }
         base.update(overrides)
-        return Settings(**base)
+        return Settings(_env_file=None, **base)
 
     def test_discord_client_id_defaults_to_empty(self):
         s = self._make_settings()

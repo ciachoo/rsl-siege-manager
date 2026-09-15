@@ -10,8 +10,10 @@ import apiClient from "../api/client";
 
 interface AuthUser {
   member_id: number | null;
+  user_account_id: number | null;
   name: string;
   role: string | null;
+  app_role: "viewer" | "manager" | "admin" | null;
   discord_id: string | null;
 }
 

@@ -32,6 +32,7 @@ from app.api.version import router as version_router
 from app.config import settings
 from app.db.session import engine
 from app.dependencies.auth import get_current_user
+from app.dependencies.csrf import cookie_origin_guard
 from app.middleware import RequestLoggingMiddleware
 from app.rate_limit import RateLimitExceeded, limiter, rate_limit_exceeded_handler
 from app.telemetry import configure_telemetry
@@ -105,6 +106,7 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 configure_telemetry(app=app, engine=engine)
 
 app.add_middleware(RequestLoggingMiddleware)
+app.middleware("http")(cookie_origin_guard)
 
 _cors_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 logger.info("CORS allowed origins: %s", _cors_origins)

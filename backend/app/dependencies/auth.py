@@ -33,6 +33,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import JWT_ALGORITHM, settings
 from app.db.session import get_db
 from app.models.member import Member
+from app.models.user_account import UserAccount
+
+SESSION_TYPE = "manager-user-v2"
+ROLE_LEVEL = {"viewer": 1, "manager": 2, "admin": 3}
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,9 @@ class AuthenticatedUser:
     role: str | None = None
     discord_id: str | None = None
     acting_member_id: int | None = None
+    user_account_id: int | None = None
+    app_role: str | None = None
+    principal_type: str = "human"
 
 
 async def _resolve_acting_member(
@@ -191,7 +198,13 @@ async def get_current_user(
     """
     # 1. Dev bypass — only permitted when ENVIRONMENT=development
     if settings.auth_disabled:
-        return AuthenticatedUser(member_id=None, name="dev-user", is_service=False)
+        return AuthenticatedUser(
+            member_id=None,
+            name="dev-user",
+            is_service=False,
+            app_role="manager",
+            principal_type="development",
+        )
 
     # 2. Service token (Bearer) — timing-safe comparison prevents timing attacks
     auth_header = request.headers.get("Authorization", "")
@@ -216,30 +229,67 @@ async def get_current_user(
                 member_id=None,
                 name="bot-service",
                 is_service=True,
+                principal_type="bot_service",
                 acting_member_id=acting_member_id,
                 discord_id=acting_discord_id,
             )
 
-    # 3. User session cookie — decode JWT and look up the member record.
+    # 3. V2 user session cookie — version required so legacy Member IDs cannot collide.
     #    X-Acting-Discord-Id is intentionally ignored here; the cookie's
-    #    member_id is the authoritative subject.
+    #    UserAccount ID in the JWT is the authoritative human subject.
     session_token = request.cookies.get("session")
     if session_token:
         try:
             payload = jwt.decode(session_token, settings.session_secret, algorithms=[JWT_ALGORITHM])
-            member = await db.get(Member, int(payload["sub"]))
-            if member:
+            if payload.get("typ") != SESSION_TYPE:
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            account = await db.get(UserAccount, int(payload["sub"]))
+            if account and account.is_active and account.app_role in ROLE_LEVEL:
+                member = await db.get(Member, account.member_id) if account.member_id else None
                 return AuthenticatedUser(
-                    member_id=member.id,
-                    name=member.name,
+                    member_id=account.member_id,
+                    name=account.display_name,
                     is_service=False,
-                    role=member.role.value if member.role else None,
-                    discord_id=member.discord_id,
+                    role=member.role.value if member and member.role else None,
+                    discord_id=account.discord_user_id,
+                    user_account_id=account.id,
+                    app_role=account.app_role,
+                    principal_type="human",
                 )
         except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError, ValueError):
             pass
 
     raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+async def require_human_user(
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> AuthenticatedUser:
+    if user.principal_type != "human" or user.user_account_id is None:
+        raise HTTPException(status_code=403, detail="Human account required")
+    return user
+
+
+def require_role(minimum: str):
+    """Build a dependency using the single central human role hierarchy."""
+    if minimum not in ROLE_LEVEL:
+        raise ValueError("Unknown application role")
+
+    async def dependency(user: AuthenticatedUser = Depends(get_current_user)) -> AuthenticatedUser:
+        if user.principal_type == "development" and minimum != "admin":
+            return user
+        if user.principal_type != "human" or user.user_account_id is None:
+            raise HTTPException(status_code=403, detail="Human account required")
+        if ROLE_LEVEL.get(user.app_role, 0) < ROLE_LEVEL[minimum]:
+            raise HTTPException(status_code=403, detail="Insufficient application role")
+        return user
+
+    return dependency
+
+
+require_viewer = require_role("viewer")
+require_manager = require_role("manager")
+require_admin = require_role("admin")
 
 
 async def get_acting_member_id(
@@ -266,4 +316,6 @@ async def get_acting_member_id(
         return user.member_id
     if user.acting_member_id is not None:
         return user.acting_member_id
+    if user.principal_type == "human":
+        raise HTTPException(status_code=404, detail="Member profile not linked")
     raise HTTPException(status_code=401, detail="Acting subject required")

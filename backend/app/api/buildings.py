@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_manager
 from app.schemas.building import (
     BuildingCreate,
     BuildingGroupResponse,
@@ -22,7 +23,12 @@ async def list_buildings(
     return await buildings_service.list_buildings(db, siege_id)
 
 
-@router.post("/sieges/{siege_id}/buildings", response_model=BuildingResponse, status_code=201)
+@router.post(
+    "/sieges/{siege_id}/buildings",
+    response_model=BuildingResponse,
+    status_code=201,
+    dependencies=[Depends(require_manager)],
+)
 async def add_building(
     siege_id: int,
     data: BuildingCreate,
@@ -31,7 +37,11 @@ async def add_building(
     return await buildings_service.add_building(db, siege_id, data)
 
 
-@router.put("/sieges/{siege_id}/buildings/{building_id}", response_model=BuildingResponse)
+@router.put(
+    "/sieges/{siege_id}/buildings/{building_id}",
+    response_model=BuildingResponse,
+    dependencies=[Depends(require_manager)],
+)
 async def update_building(
     siege_id: int,
     building_id: int,
@@ -41,7 +51,11 @@ async def update_building(
     return await buildings_service.update_building(db, siege_id, building_id, data)
 
 
-@router.delete("/sieges/{siege_id}/buildings/{building_id}", status_code=204)
+@router.delete(
+    "/sieges/{siege_id}/buildings/{building_id}",
+    status_code=204,
+    dependencies=[Depends(require_manager)],
+)
 async def delete_building(
     siege_id: int,
     building_id: int,
@@ -55,6 +69,7 @@ async def delete_building(
     "/sieges/{siege_id}/buildings/{building_id}/groups",
     response_model=BuildingGroupResponse,
     status_code=201,
+    dependencies=[Depends(require_manager)],
 )
 async def add_group(
     siege_id: int,
@@ -65,7 +80,11 @@ async def add_group(
     return await buildings_service.add_group(db, siege_id, building_id, data)
 
 
-@router.delete("/sieges/{siege_id}/buildings/{building_id}/groups/{group_id}", status_code=204)
+@router.delete(
+    "/sieges/{siege_id}/buildings/{building_id}/groups/{group_id}",
+    status_code=204,
+    dependencies=[Depends(require_manager)],
+)
 async def delete_group(
     siege_id: int,
     building_id: int,

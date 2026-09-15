@@ -33,6 +33,8 @@ def _require_member_session(current_user: AuthenticatedUser) -> None:
             browser session cookie).
     """
     if current_user.member_id is None:
+        if current_user.principal_type == "human":
+            raise HTTPException(status_code=404, detail="Member profile not linked")
         raise HTTPException(
             status_code=400,
             detail=_SERVICE_PRINCIPAL_DETAIL,

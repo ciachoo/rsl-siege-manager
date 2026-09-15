@@ -27,6 +27,7 @@ def _make_jwt(
     exp_hours: int = 24,
 ) -> str:
     payload = {
+        "typ": "manager-user-v2",
         "sub": str(member_id),
         "name": "TestUser",
         "iat": datetime.now(UTC),
@@ -64,6 +65,11 @@ def _make_member(
         role=role,
         power_level=None,
         is_active=True,
+        app_role="viewer",
+        member_id=id,
+        display_name=name,
+        discord_user_id=discord_id,
+        last_login_at=None,
     )
 
 
@@ -362,8 +368,9 @@ async def test_callback_happy_path(monkeypatch):
     """Full valid callback flow issues a session cookie and redirects to /."""
     monkeypatch.setattr("app.config.settings.session_secret", TEST_SESSION_SECRET)
     monkeypatch.setattr("app.config.settings.environment", "development")
+    monkeypatch.setattr("app.config.settings.discord_required_role", "Clan Deputies")
 
-    member = _make_member(id=7, discord_id="discord-777")
+    member = _make_member(id=7, discord_id="777777777777777777")
     mock_db = _make_mock_db(member=member)
     # scalar_one_or_none is a sync method on the SQLAlchemy result object
     mock_result = MagicMock()
@@ -382,7 +389,7 @@ async def test_callback_happy_path(monkeypatch):
         ):
             with patch(
                 "app.api.auth._get_discord_user",
-                new=AsyncMock(return_value={"id": "discord-777"}),
+                new=AsyncMock(return_value={"id": "777777777777777777", "username": "TestUser"}),
             ):
                 with patch(
                     "app.api.auth._check_guild_membership",
@@ -519,7 +526,7 @@ async def test_callback_with_required_role_proceeds_to_member_lookup(monkeypatch
     monkeypatch.setattr("app.config.settings.discord_required_role", "Clan Deputies")
     monkeypatch.setattr("app.config.settings.session_secret", TEST_SESSION_SECRET)
 
-    member = _make_member(id=10, discord_id="discord-deputy")
+    member = _make_member(id=10, discord_id="101010101010101010")
     mock_db = _make_mock_db(member=member)
     mock_result = MagicMock()
     mock_result.scalar_one_or_none = MagicMock(return_value=member)
@@ -537,7 +544,7 @@ async def test_callback_with_required_role_proceeds_to_member_lookup(monkeypatch
         ):
             with patch(
                 "app.api.auth._get_discord_user",
-                new=AsyncMock(return_value={"id": "discord-deputy"}),
+                new=AsyncMock(return_value={"id": "101010101010101010", "username": "TestUser"}),
             ):
                 with patch(
                     "app.api.auth._check_guild_membership",
@@ -600,6 +607,7 @@ async def test_callback_bot_unreachable_redirects_service_unavailable(monkeypatc
 async def test_callback_no_member_record_redirects(monkeypatch):
     """Guild member whose discord_id isn't in the DB redirects to /login?error=unauthorized."""
     monkeypatch.setattr("app.config.settings.environment", "development")
+    monkeypatch.setattr("app.config.settings.discord_required_role", "Clan Deputies")
 
     mock_db = AsyncMock()
     mock_result = MagicMock()
@@ -618,7 +626,7 @@ async def test_callback_no_member_record_redirects(monkeypatch):
         ):
             with patch(
                 "app.api.auth._get_discord_user",
-                new=AsyncMock(return_value={"id": "discord-unknown"}),
+                new=AsyncMock(return_value={"id": "123456789012345678"}),
             ):
                 with patch(
                     "app.api.auth._check_guild_membership",
@@ -664,7 +672,7 @@ async def test_me_with_valid_session(monkeypatch):
     monkeypatch.setattr("app.config.settings.session_secret", TEST_SESSION_SECRET)
 
     member = _make_member(
-        id=5, name="Alice", discord_id="discord-555", role=MemberRole.heavy_hitter
+        id=5, name="Alice", discord_id="555555555555555555", role=MemberRole.heavy_hitter
     )
     mock_db = _make_mock_db(member=member)
 
@@ -685,7 +693,8 @@ async def test_me_with_valid_session(monkeypatch):
     assert data["member_id"] == 5
     assert data["name"] == "Alice"
     assert data["role"] == "heavy_hitter"
-    assert data["discord_id"] == "discord-555"
+    assert data["discord_id"] == "555555555555555555"
+    assert data["app_role"] == "viewer"
 
 
 @pytest.mark.asyncio

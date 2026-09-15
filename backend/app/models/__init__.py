@@ -16,11 +16,12 @@ from app.models.position import Position  # noqa: F401
 from app.models.post import Post  # noqa: F401
 from app.models.post_active_condition import post_active_condition  # noqa: F401
 from app.models.post_condition import PostCondition  # noqa: F401
-from app.models.siege import Siege  # noqa: F401
-from app.models.siege_member import SiegeMember  # noqa: F401
 from app.models.scanner import (  # noqa: F401
     ObservedBuilding,
     ObservedPost,
     ScannerIdentity,
     ScannerSnapshot,
 )
+from app.models.siege import Siege  # noqa: F401
+from app.models.siege_member import SiegeMember  # noqa: F401
+from app.models.user_account import UserAccount  # noqa: F401

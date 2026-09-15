@@ -5,6 +5,7 @@ import { Info, LogOut, Shield } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { fetchConfig } from "../api/config";
 import ChangelogDropdown from "./ChangelogDropdown";
+import { useEffect, useState } from "react";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   cn(
@@ -16,6 +17,13 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  useEffect(() => {
+    const onDenied = () => setPermissionDenied(true);
+    window.addEventListener("manager:permission-denied", onDenied);
+    return () =>
+      window.removeEventListener("manager:permission-denied", onDenied);
+  }, []);
 
   const { data: config, isError } = useQuery({
     queryKey: ["app-config"],
@@ -36,6 +44,20 @@ export default function Layout() {
           Demo mode — authentication disabled. Set{" "}
           <code className="font-mono">AUTH_DISABLED=false</code> for real
           deployments.
+        </div>
+      )}
+      {permissionDenied && (
+        <div
+          role="alert"
+          className="bg-red-50 px-4 py-2 text-center text-sm text-red-700"
+        >
+          You do not have permission to perform that action.
+          <button
+            className="ml-3 underline"
+            onClick={() => setPermissionDenied(false)}
+          >
+            Dismiss
+          </button>
         </div>
       )}
       <nav className="border-b border-slate-200 bg-white shadow-sm">

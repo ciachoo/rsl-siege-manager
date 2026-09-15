@@ -13,7 +13,12 @@ function TestConsumer() {
   const { user, isAuthenticated, isLoading } = useAuth();
   if (isLoading) return <div>Loading...</div>;
   if (!isAuthenticated) return <div>Not authenticated</div>;
-  return <div>Hello {user?.name}</div>;
+  return (
+    <div>
+      Hello {user?.name}; app role {user?.app_role ?? "none"}; member role{" "}
+      {user?.role ?? "none"}
+    </div>
+  );
 }
 
 describe("AuthContext", () => {
@@ -22,7 +27,7 @@ describe("AuthContext", () => {
     renderWithProviders(<TestConsumer />);
     expect(screen.getByText("Loading...")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText("Hello TestUser")).toBeInTheDocument();
+      expect(screen.getByText(/Hello TestUser/)).toBeInTheDocument();
     });
   });
 
@@ -33,6 +38,27 @@ describe("AuthContext", () => {
     renderWithProviders(<TestConsumer />);
     await waitFor(() => {
       expect(screen.getByText("Not authenticated")).toBeInTheDocument();
+    });
+  });
+
+  it("keeps application role distinct from participant role", async () => {
+    server.use(
+      http.get("/api/auth/me", () =>
+        HttpResponse.json({
+          member_id: 7,
+          user_account_id: 3,
+          name: "Operator",
+          role: "novice",
+          app_role: "admin",
+          discord_id: "123456789012345678",
+        })
+      )
+    );
+    renderWithProviders(<TestConsumer />);
+    await waitFor(() => {
+      expect(
+        screen.getByText(/app role admin; member role novice/)
+      ).toBeInTheDocument();
     });
   });
 });

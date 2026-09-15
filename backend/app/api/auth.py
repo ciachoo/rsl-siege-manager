@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import JWT_ALGORITHM, settings
 from app.db.session import get_db
-from app.dependencies.auth import AuthenticatedUser, get_current_user
-from app.models.member import Member
+from app.dependencies.auth import SESSION_TYPE, AuthenticatedUser, get_current_user
+from app.models.user_account import UserAccount
 from app.rate_limit import limiter
 from app.services.bot_client import bot_client
 
@@ -119,7 +119,7 @@ async def callback(
 
     Validates CSRF state, exchanges the authorization code for an access token,
     fetches the Discord user profile, verifies guild membership via the bot
-    sidecar, matches to a Member record, and issues a signed JWT session cookie.
+    sidecar, matches a provisioned UserAccount, and issues a signed JWT session cookie.
 
     Rate-limited per client IP via AUTH_CALLBACK_RATE_LIMIT (default 5/minute).
     The limit is read lazily from ``settings`` so env-var overrides and test
@@ -168,18 +168,28 @@ async def callback(
         )
         return _error_redirect(AuthError.INSUFFICIENT_ROLE)
 
-    # 5. Match member by discord_id only — no username fallback
-    result = await db.execute(select(Member).where(Member.discord_id == discord_id))
-    member = result.scalar_one_or_none()
-    if not member:
-        logger.warning("auth_member_not_found", extra={"discord_id": discord_id})
+    # 5. Exact account identity; Discord roles are admission, not app authorization.
+    if not isinstance(discord_id, str) or not discord_id.isdigit() or len(discord_id) > 20:
+        return _error_redirect(AuthError.UNAUTHORIZED)
+    result = await db.execute(select(UserAccount).where(UserAccount.discord_user_id == discord_id))
+    account = result.scalar_one_or_none()
+    if not account or not account.is_active:
+        logger.warning("auth_account_not_admitted", extra={"discord_id": discord_id})
         return _error_redirect(AuthError.UNAUTHORIZED)
 
-    # 6. Issue JWT — 24-hour expiry
+    # 6. Login metadata and explicitly versioned human JWT — 24-hour expiry.
+    display_name = discord_user.get("global_name") or discord_user.get("username")
+    if not isinstance(display_name, str) or not display_name:
+        logger.error("auth_discord_display_name_missing")
+        return _error_redirect(AuthError.SERVICE_UNAVAILABLE)
     now = datetime.now(UTC)
+    account.display_name = display_name
+    account.last_login_at = now
+    await db.commit()
     token_payload = {
-        "sub": str(member.id),
-        "name": member.name,
+        "typ": SESSION_TYPE,
+        "sub": str(account.id),
+        "name": account.display_name,
         "iat": now,
         "exp": now + timedelta(hours=24),
     }
@@ -213,8 +223,10 @@ async def me(
     """Return identity information for the currently authenticated caller."""
     return {
         "member_id": current_user.member_id,
+        "user_account_id": current_user.user_account_id,
         "name": current_user.name,
         "role": current_user.role,
+        "app_role": current_user.app_role,
         "discord_id": current_user.discord_id,
     }
 

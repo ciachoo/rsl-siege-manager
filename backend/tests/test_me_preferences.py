@@ -64,6 +64,10 @@ def _make_member(
         sort_value=None,
         is_active=is_active,
         created_at=datetime.datetime(2026, 1, 1, 0, 0, 0),
+        member_id=id,
+        display_name=name,
+        discord_user_id=discord_id,
+        app_role="viewer",
     )
 
 
@@ -108,6 +112,7 @@ def _make_jwt(member_id: int, secret: str = TEST_SESSION_SECRET) -> str:
     import jwt
 
     payload = {
+        "typ": "manager-user-v2",
         "sub": str(member_id),
         "name": "TestUser",
         "iat": dt.now(UTC),

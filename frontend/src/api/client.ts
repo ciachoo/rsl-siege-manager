@@ -17,6 +17,9 @@ apiClient.interceptors.response.use(
     ) {
       window.location.href = "/login";
     }
+    if (error.response?.status === 403) {
+      window.dispatchEvent(new CustomEvent("manager:permission-denied"));
+    }
     return Promise.reject(error);
   }
 );
