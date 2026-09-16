@@ -26,6 +26,7 @@ from app.api.posts import router as posts_router
 from app.api.reference import router as reference_router
 from app.api.scanner import router as scanner_router
 from app.api.scanner_admin import router as scanner_admin_router
+from app.api.scanner_observations import router as scanner_observations_router
 from app.api.siege_members import router as siege_members_router
 from app.api.sieges import router as sieges_router
 from app.api.validation import router as validation_router
@@ -150,3 +151,4 @@ app.include_router(images_router, prefix="/api", dependencies=_auth_deps)
 app.include_router(notifications_router, prefix="/api", dependencies=_auth_deps)
 app.include_router(post_priority_config_router, prefix="/api", dependencies=_auth_deps)
 app.include_router(scanner_admin_router, prefix="/api", dependencies=_auth_deps)
+app.include_router(scanner_observations_router, prefix="/api", dependencies=_auth_deps)

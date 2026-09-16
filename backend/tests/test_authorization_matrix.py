@@ -73,6 +73,9 @@ MANAGER = {
 }
 VIEWER = {
     ("GET", "/api/auth/me"),
+    ("GET", "/api/scanner-observations/snapshots"),
+    ("GET", "/api/scanner-observations/snapshots/latest"),
+    ("GET", "/api/scanner-observations/snapshots/{snapshot_db_id}"),
     ("GET", "/api/building-types"),
     ("GET", "/api/member-roles"),
     ("GET", "/api/members"),
@@ -116,7 +119,7 @@ def test_all_application_routes_have_the_classified_authorization_dependency():
     routes = dict(_application_routes())
     expected = PUBLIC | SCANNER | DUAL_BOT_VIEWER | VIEWER | MANAGER | ADMIN
 
-    assert len(routes) == 70
+    assert len(routes) == 73
     assert set(routes) == expected
 
     for key, dependencies in routes.items():
