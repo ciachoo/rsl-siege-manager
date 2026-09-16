@@ -170,6 +170,8 @@ async def test_http_bot_and_scanner_cross_principal_isolation(db, monkeypatch):
         assert (
             await client.get("/api/members/me/preferences", headers=bot_headers)
         ).status_code == 200
+        assert (await client.get("/api/post-conditions", headers=bot_headers)).status_code == 200
+        assert (await client.get("/api/building-types", headers=bot_headers)).status_code == 403
         assert (await client.get("/api/member-roles", headers=bot_headers)).status_code == 403
         assert (await client.post("/api/sieges/1/activate", headers=bot_headers)).status_code == 403
         assert (
@@ -186,6 +188,9 @@ async def test_http_bot_and_scanner_cross_principal_isolation(db, monkeypatch):
                 headers=scanner_headers,
             )
         ).status_code == 201
+        assert (
+            await client.get("/api/post-conditions", headers=scanner_headers)
+        ).status_code == 401
         assert (await client.get("/api/member-roles", headers=scanner_headers)).status_code == 401
         assert (
             await client.post("/api/sieges/1/activate", headers=scanner_headers)

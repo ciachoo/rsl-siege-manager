@@ -25,7 +25,7 @@ Podstawa: czysty checkpoint `164c33882e30a3e898c805195cadb7f826dec0cf`, 2026-09-
 | POST `/api/auth/logout` | `api/auth.py::logout` | usunięcie ciasteczka | brak | PUBLIC |
 | GET `/api/auth/me` | `api/auth.py::me` | odczyt własnej tożsamości | `get_current_user` | HUMAN_VIEWER |
 | POST `/api/scanner/snapshots` | `api/scanner.py::ingest_snapshot` | zapis snapshotu | `get_authenticated_scanner` | SCANNER |
-| GET `/api/post-conditions` | `api/reference.py::get_post_conditions` | odczyt katalogu | router `get_current_user` | HUMAN_VIEWER |
+| GET `/api/post-conditions` | `api/reference.py::get_post_conditions` | odczyt katalogu używanego przez UI i `rsl-mom-bot` | router `get_current_user` | HUMAN_VIEWER lub BOT_SERVICE |
 | GET `/api/building-types` | `api/reference.py::get_building_types` | odczyt katalogu | router `get_current_user` | HUMAN_VIEWER |
 | GET `/api/member-roles` | `api/reference.py::get_member_roles` | odczyt katalogu | router `get_current_user` | HUMAN_VIEWER |
 | POST `/api/members/discord-sync/preview` | `api/discord_sync.py::preview_discord_sync` | globalny podgląd tożsamości z Discord | router `get_current_user` | HUMAN_ADMIN |
@@ -104,7 +104,9 @@ Development dodaje frameworkowe `GET /openapi.json`, `GET /api/docs` i `GET /doc
 
 Każda z 65 tras produktu ma teraz jawnie przypisaną granicę autoryzacji zgodną z macierzą powyżej. Trasy ludzkie korzystają z centralnych zależności `require_viewer`, `require_manager` albo `require_admin`. `/api/auth/me` wymaga człowieka z rolą VIEWER lub wyższą. Trasy odczytu Managera nie przyjmują tokenu bota ani poświadczenia skanera, a mutacje planowania wymagają MANAGER. Globalne operacje na Memberach, synchronizacja tożsamości Discord i zmiana globalnego katalogu priorytetów wymagają ADMIN.
 
-Kontrakt `/api/members/me/preferences` zachowuje dostęp dla zaufanego `rsl-mom-bot` działającego w imieniu Membera oraz dla powiązanego konta ludzkiego VIEWER lub wyższego. `BOT_SERVICE_TOKEN` uwierzytelnia cały proces bota, a `X-Acting-Discord-Id` jest delegowanym kontekstem podmiotu, który upstream pobiera bezpośrednio z `discord.Interaction.user.id`. Manager nie uwierzytelnia niezależnie końcowego użytkownika Discord. Służy temu wąska zależność `require_bot_service_or_human_viewer`; nie daje ona botowi dostępu do pozostałych tras Managera.
+Kontrakt `GET /api/post-conditions` dopuszcza HUMAN_VIEWER lub wyższą rolę oraz zaufany BOT_SERVICE przez wąską zależność `require_bot_service_or_human_viewer`. Nie rozszerza dostępu bota do `/api/building-types`, `/api/member-roles` ani innych tras VIEWER. Skaner pozostaje odrzucony.
+
+Kontrakt `/api/members/me/preferences` zachowuje dostęp dla zaufanego `rsl-mom-bot` działającego w imieniu Membera oraz dla powiązanego konta ludzkiego VIEWER lub wyższego. `BOT_SERVICE_TOKEN` uwierzytelnia cały proces bota, a `X-Acting-Discord-Id` jest delegowanym kontekstem podmiotu, który upstream pobiera bezpośrednio z `discord.Interaction.user.id`. Manager nie uwierzytelnia niezależnie końcowego użytkownika Discord. Służy temu wąska zależność `require_bot_service_or_human_viewer`; poza katalogiem Post Conditions nie daje ona botowi dostępu do pozostałych tras Managera.
 
 Manager rozwiązuje podmiot bota wyłącznie przez dokładne `Member.discord_id == X-Acting-Discord-Id`. `X-Acting-Discord-Username` nie wybiera Membera, nie ustanawia tożsamości i nie powoduje zapisu ani automatycznego backfillu. Brak dokładnego powiązania Discord ID zwraca 404 bez mutacji; powiązanie musi zostać utworzone przez kontrolowany workflow Discord sync/admin. Ludzkie `/me` nadal opiera się na opcjonalnym `UserAccount.member_id` i ignoruje nagłówki acting-user. Endpoint skanera nadal korzysta wyłącznie z `get_authenticated_scanner`. Publiczne trasy oraz model OAuth/UserAccount nie zostały zmienione.
 
@@ -124,3 +126,16 @@ Wyniki końcowe:
 - `git diff --check`: zaliczony.
 
 Frontend nie został zmieniony: istniejąca obsługa 403 nadal pokazuje komunikat o braku uprawnień. Task #5C dotyczy granic API, dlatego nie uruchamiano zestawu frontendowego. Nie pozostała nierozstrzygnięta trasa ani blocker implementacyjny. Provisioning skanera pozostaje poza zakresem do Task #6.
+
+## Uzupełnienie Task #5C.1 — zgodność katalogu Post Conditions
+
+Audyt `rsl-mom-bot` potwierdził, że bot pobiera globalny katalog przez `GET /api/post-conditions` z poświadczeniem BOT_SERVICE. Trasa korzysta teraz z `require_bot_service_or_human_viewer`, dlatego dopuszcza VIEWER, MANAGER, ADMIN, development stub i BOT_SERVICE. Anonimowy użytkownik oraz skaner są odrzucani. Pozostałe katalogi, w tym `/api/building-types` i `/api/member-roles`, nadal korzystają wyłącznie z `require_viewer`; BOT_SERVICE nie uzyskał ogólnego dostępu VIEWER.
+
+Walidacja #5C.1:
+
+- skupione testy autoryzacji i skanera: **34 passed**;
+- pełny zestaw auth/RBAC/scanner/bootstrap/migration wraz z `/me/preferences`: **100 passed**;
+- praktyczny pełny backend z ustalonymi lokalnymi wyłączeniami: **557 passed**;
+- Ruff: zaliczony;
+- Black: zaliczony dla całego `app` i `tests`;
+- `git diff --check`: zaliczony.

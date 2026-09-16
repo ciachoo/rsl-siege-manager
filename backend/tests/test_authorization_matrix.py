@@ -24,6 +24,7 @@ PUBLIC = {
 }
 SCANNER = {("POST", "/api/scanner/snapshots")}
 DUAL_BOT_VIEWER = {
+    ("GET", "/api/post-conditions"),
     ("GET", "/api/members/me/preferences"),
     ("PUT", "/api/members/me/preferences"),
 }
@@ -67,7 +68,6 @@ MANAGER = {
 }
 VIEWER = {
     ("GET", "/api/auth/me"),
-    ("GET", "/api/post-conditions"),
     ("GET", "/api/building-types"),
     ("GET", "/api/member-roles"),
     ("GET", "/api/members"),
@@ -210,3 +210,52 @@ async def test_human_roles_can_read_viewer_endpoint(role):
         app.dependency_overrides.pop(get_current_user, None)
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["viewer", "manager", "admin"])
+async def test_human_roles_can_read_post_conditions_catalog(role, monkeypatch):
+    from app.dependencies.auth import get_current_user
+    from app.services import reference as reference_service
+
+    principal = _principal("human", role)
+
+    async def override_current_user():
+        return principal
+
+    async def empty_catalog(_db, _stronghold_level):
+        return []
+
+    monkeypatch.setattr(reference_service, "get_post_conditions", empty_catalog)
+    app.dependency_overrides[get_current_user] = override_current_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/api/post-conditions")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_anonymous_cannot_read_post_conditions_catalog(monkeypatch):
+    monkeypatch.setattr("app.config.settings.auth_disabled", False)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/post-conditions")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_development_principal_can_read_post_conditions_catalog(monkeypatch):
+    from app.services import reference as reference_service
+
+    async def empty_catalog(_db, _stronghold_level):
+        return []
+
+    monkeypatch.setattr(reference_service, "get_post_conditions", empty_catalog)
+    monkeypatch.setattr("app.config.settings.auth_disabled", True)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/post-conditions")
+    assert response.status_code == 200
+    assert response.json() == []

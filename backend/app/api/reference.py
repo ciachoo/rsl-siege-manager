@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.dependencies.auth import require_viewer
+from app.dependencies.auth import require_bot_service_or_human_viewer, require_viewer
 from app.schemas.post_condition import PostConditionResponse
 from app.services import reference as reference_service
 
@@ -12,7 +12,7 @@ router = APIRouter(tags=["reference"])
 @router.get(
     "/post-conditions",
     response_model=list[PostConditionResponse],
-    dependencies=[Depends(require_viewer)],
+    dependencies=[Depends(require_bot_service_or_human_viewer)],
 )
 async def get_post_conditions(
     stronghold_level: int | None = None,
