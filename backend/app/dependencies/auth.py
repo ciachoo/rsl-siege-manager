@@ -7,27 +7,18 @@ Checks three paths in order:
 4. Otherwise → HTTP 401
 
 The ``get_acting_member_id`` dependency extends service-token auth with an
-optional ``X-Acting-Discord-Id`` header that allows the bot to act on behalf
-of a specific member for ``/me/*`` endpoints.
-
-When ``X-Acting-Discord-Id`` is present, the member lookup follows this order:
-
-1. Snowflake match — ``Member.discord_id == acting_discord_id``.  Hit → done.
-2. Username fallback (requires ``X-Acting-Discord-Username``) — case-insensitive
-   match on ``Member.discord_username``.  Multi-row → 409.  No rows → 404.
-3. Backfill conflict guard — if the matched member has no ``discord_id``,
-   verify no other row already owns ``acting_discord_id``.  Conflict → 404.
-4. Opportunistic backfill — write ``discord_id = acting_discord_id`` and commit
-   so future calls hit path 1 directly.
+optional ``X-Acting-Discord-Id`` header that allows the trusted bot to delegate
+the Discord interaction subject for ``/me/*`` endpoints. Resolution uses only
+an exact ``Member.discord_id`` match. Usernames never establish identity or
+trigger automatic linking.
 """
 
-import logging
 import secrets
 from dataclasses import dataclass
 
 import jwt
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import JWT_ALGORITHM, settings
@@ -37,8 +28,6 @@ from app.models.user_account import UserAccount
 
 SESSION_TYPE = "manager-user-v2"
 ROLE_LEVEL = {"viewer": 1, "manager": 2, "admin": 3}
-
-logger = logging.getLogger(__name__)
 
 # Reused across every 404 branch so the bot sees a consistent message.
 _NOT_REGISTERED_MSG = "Acting Discord user not found"
@@ -76,98 +65,20 @@ class AuthenticatedUser:
 async def _resolve_acting_member(
     db: AsyncSession,
     acting_discord_id: str,
-    acting_username: str | None,
 ) -> Member:
-    """Resolve the acting member from a Discord snowflake (and optional username).
+    """Resolve a bot-delegated subject by exact, stable Discord ID only.
 
-    Lookup order:
-
-    1. Snowflake match — ``Member.discord_id == acting_discord_id``.
-       Returns immediately on hit.
-    2. Username fallback — case-insensitive match on
-       ``Member.discord_username``.  Skipped when ``acting_username`` is
-       ``None``.
-    3. Multi-row guard — raises 409 when two or more rows share the same
-       lowercased ``discord_username``.
-    4. Backfill conflict guard — if the matched member has
-       ``discord_id IS NULL``, checks that no other row already owns
-       ``acting_discord_id``.  Raises 404 on conflict.
-    5. Opportunistic backfill — writes ``discord_id = acting_discord_id``
-       and commits so future calls hit path 1 directly.
-
-    Args:
-        db: Async SQLAlchemy session.
-        acting_discord_id: Validated numeric Discord snowflake string.
-        acting_username: Value of the ``X-Acting-Discord-Username`` header,
-            or ``None`` when the header was absent.
-
-    Returns:
-        The resolved ``Member`` record.
-
-    Raises:
-        HTTPException: 404 when no member can be matched, or when the
-            backfill conflict guard fires.  409 when two members share the
-            same lowercased ``discord_username``.
+    ``BOT_SERVICE_TOKEN`` authenticates the trusted bot service. The bot
+    delegates the Discord interaction subject through ``X-Acting-Discord-Id``.
+    Manager never uses username metadata to establish or repair identity;
+    missing links must be created through the controlled Discord sync/admin
+    workflow.
     """
-    # --- Step 1: snowflake lookup -------------------------------------------
     result = await db.execute(select(Member).where(Member.discord_id == acting_discord_id))
     member = result.scalar_one_or_none()
-    if member is not None:
-        return member
-
-    # --- Step 2: username fallback ------------------------------------------
-    if not acting_username:
+    if member is None:
         raise HTTPException(status_code=404, detail=_NOT_REGISTERED_MSG)
-
-    if len(acting_username) > 32:
-        raise HTTPException(
-            status_code=400,
-            detail="X-Acting-Discord-Username exceeds maximum length",
-        )
-
-    result = await db.execute(
-        select(Member)
-        .where(func.lower(Member.discord_username) == acting_username.lower())
-        .limit(2)
-    )
-    rows = result.scalars().all()
-
-    # --- Step 3: multi-row guard --------------------------------------------
-    if len(rows) > 1:
-        raise HTTPException(
-            status_code=409,
-            detail="multiple members claim this Discord username; admin must resolve",
-        )
-
-    if not rows:
-        raise HTTPException(status_code=404, detail=_NOT_REGISTERED_MSG)
-
-    matched = rows[0]
-
-    # --- Step 4: backfill conflict guard ------------------------------------
-    if matched.discord_id is None:
-        conflict_result = await db.execute(
-            select(Member.id).where(Member.discord_id == acting_discord_id)
-        )
-        if conflict_result.scalar_one_or_none() is not None:
-            logger.warning(
-                "Backfill conflict: acting_discord_id=%s already owned "
-                "by another member; matched member id=%s left unchanged",
-                acting_discord_id,
-                matched.id,
-            )
-            raise HTTPException(status_code=404, detail=_NOT_REGISTERED_MSG)
-
-        # --- Step 5: opportunistic backfill ---------------------------------
-        # The commit here is intentional and independent of outer request
-        # success.  get_db() yields a fresh session per request, so nothing
-        # else is dirty.  Persisting the backfill unconditionally means a
-        # user hitting transient downstream errors will not permanently pay
-        # the slow username-fallback path on every retry.
-        matched.discord_id = acting_discord_id
-        await db.commit()
-
-    return matched
+    return member
 
 
 async def get_current_user(
@@ -219,11 +130,7 @@ async def get_current_user(
                         status_code=400,
                         detail="X-Acting-Discord-Id must be a numeric Discord snowflake",
                     )
-                acting_member = await _resolve_acting_member(
-                    db,
-                    acting_discord_id,
-                    request.headers.get("X-Acting-Discord-Username"),
-                )
+                acting_member = await _resolve_acting_member(db, acting_discord_id)
                 acting_member_id = acting_member.id
             return AuthenticatedUser(
                 member_id=None,
@@ -284,12 +191,30 @@ def require_role(minimum: str):
             raise HTTPException(status_code=403, detail="Insufficient application role")
         return user
 
+    dependency.__name__ = f"require_{minimum}"
     return dependency
 
 
 require_viewer = require_role("viewer")
 require_manager = require_role("manager")
 require_admin = require_role("admin")
+
+
+async def require_bot_service_or_human_viewer(
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> AuthenticatedUser:
+    """Allow the documented bot preference contract and human VIEWER compatibility."""
+    if user.principal_type == "bot_service":
+        return user
+    if user.principal_type == "development":
+        return user
+    if (
+        user.principal_type == "human"
+        and user.user_account_id is not None
+        and ROLE_LEVEL.get(user.app_role, 0) >= ROLE_LEVEL["viewer"]
+    ):
+        return user
+    raise HTTPException(status_code=403, detail="Human account or bot service required")
 
 
 async def get_acting_member_id(

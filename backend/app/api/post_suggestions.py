@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_manager
 from app.schemas.post_suggestions import (
     PostSuggestionApplyRequest,
     PostSuggestionApplyResult,
@@ -29,6 +30,7 @@ router = APIRouter(tags=["post_suggestions"])
 @router.post(
     "/sieges/{siege_id}/post-suggestions",
     response_model=PostSuggestionPreviewResult,
+    dependencies=[Depends(require_manager)],
 )
 async def preview_post_suggestions(
     siege_id: int,
@@ -53,6 +55,7 @@ async def preview_post_suggestions(
 @router.post(
     "/sieges/{siege_id}/post-suggestions/apply",
     response_model=PostSuggestionApplyResult,
+    dependencies=[Depends(require_manager)],
 )
 async def apply_post_suggestions(
     siege_id: int,

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_manager, require_viewer
 from app.models.post import Post
 from app.schemas.post import PostConditionsUpdate, PostResponse, PostUpdate
 from app.services import posts as posts_service
@@ -30,7 +31,11 @@ def _serialize_post(post: Post) -> dict:
     }
 
 
-@router.get("/sieges/{siege_id}/posts", response_model=list[PostResponse])
+@router.get(
+    "/sieges/{siege_id}/posts",
+    response_model=list[PostResponse],
+    dependencies=[Depends(require_viewer)],
+)
 async def list_posts(
     siege_id: int,
     db: AsyncSession = Depends(get_db),
@@ -40,7 +45,11 @@ async def list_posts(
     return [_serialize_post(p) for p in posts_sorted]
 
 
-@router.put("/sieges/{siege_id}/posts/{post_id}", response_model=PostResponse)
+@router.put(
+    "/sieges/{siege_id}/posts/{post_id}",
+    response_model=PostResponse,
+    dependencies=[Depends(require_manager)],
+)
 async def update_post(
     siege_id: int,
     post_id: int,
@@ -54,6 +63,7 @@ async def update_post(
 @router.put(
     "/sieges/{siege_id}/posts/{post_id}/conditions",
     response_model=PostResponse,
+    dependencies=[Depends(require_manager)],
 )
 async def set_post_conditions(
     siege_id: int,

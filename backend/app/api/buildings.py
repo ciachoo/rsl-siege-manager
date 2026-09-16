@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.dependencies.auth import require_manager
+from app.dependencies.auth import require_manager, require_viewer
 from app.schemas.building import (
     BuildingCreate,
     BuildingGroupResponse,
@@ -15,7 +15,11 @@ from app.services import buildings as buildings_service
 router = APIRouter(tags=["buildings"])
 
 
-@router.get("/sieges/{siege_id}/buildings", response_model=list[BuildingResponse])
+@router.get(
+    "/sieges/{siege_id}/buildings",
+    response_model=list[BuildingResponse],
+    dependencies=[Depends(require_viewer)],
+)
 async def list_buildings(
     siege_id: int,
     db: AsyncSession = Depends(get_db),

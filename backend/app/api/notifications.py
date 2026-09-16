@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.db.session import AsyncSessionLocal, get_db
+from app.dependencies.auth import require_manager, require_viewer
 from app.models.building import Building
 from app.models.building_group import BuildingGroup
 from app.models.enums import MemberRole, NotificationBatchStatus, SiegeStatus
@@ -133,7 +134,11 @@ async def _send_dms(batch_id: int, members_data: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/sieges/{siege_id}/notify", response_model=NotifyResponse)
+@router.post(
+    "/sieges/{siege_id}/notify",
+    response_model=NotifyResponse,
+    dependencies=[Depends(require_manager)],
+)
 async def notify_siege_members(
     siege_id: int,
     background_tasks: BackgroundTasks,
@@ -301,6 +306,7 @@ async def notify_siege_members(
 @router.get(
     "/sieges/{siege_id}/notify/{batch_id}",
     response_model=NotificationBatchResponse,
+    dependencies=[Depends(require_viewer)],
 )
 async def get_notification_batch(
     siege_id: int,
@@ -363,7 +369,7 @@ async def get_notification_batch(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/sieges/{siege_id}/post-to-channel")
+@router.post("/sieges/{siege_id}/post-to-channel", dependencies=[Depends(require_manager)])
 async def post_to_channel(
     siege_id: int,
     db: AsyncSession = Depends(get_db),

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.dependencies.auth import require_manager
+from app.dependencies.auth import require_manager, require_viewer
 from app.models.enums import SiegeStatus
 from app.schemas.siege import SiegeCreate, SiegeResponse, SiegeUpdate
 from app.services import sieges as sieges_service
@@ -10,7 +10,7 @@ from app.services import sieges as sieges_service
 router = APIRouter(tags=["sieges"])
 
 
-@router.get("/sieges", response_model=list[SiegeResponse])
+@router.get("/sieges", response_model=list[SiegeResponse], dependencies=[Depends(require_viewer)])
 async def list_sieges(
     status: SiegeStatus | None = None,
     db: AsyncSession = Depends(get_db),
@@ -42,7 +42,9 @@ async def create_siege(
     return response
 
 
-@router.get("/sieges/{siege_id}", response_model=SiegeResponse)
+@router.get(
+    "/sieges/{siege_id}", response_model=SiegeResponse, dependencies=[Depends(require_viewer)]
+)
 async def get_siege(
     siege_id: int,
     db: AsyncSession = Depends(get_db),

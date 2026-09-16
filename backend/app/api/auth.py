@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import JWT_ALGORITHM, settings
 from app.db.session import get_db
-from app.dependencies.auth import SESSION_TYPE, AuthenticatedUser, get_current_user
+from app.dependencies.auth import SESSION_TYPE, AuthenticatedUser, require_viewer
 from app.models.user_account import UserAccount
 from app.rate_limit import limiter
 from app.services.bot_client import bot_client
@@ -218,7 +218,7 @@ async def logout(response: Response) -> dict:
 
 @router.get("/me")
 async def me(
-    current_user: AuthenticatedUser = Depends(get_current_user),
+    current_user: AuthenticatedUser = Depends(require_viewer),
 ) -> dict:
     """Return identity information for the currently authenticated caller."""
     return {

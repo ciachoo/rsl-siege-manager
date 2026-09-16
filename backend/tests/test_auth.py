@@ -120,8 +120,8 @@ async def test_auth_disabled_allows_access(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_valid_service_token_allows_access(monkeypatch):
-    """A correct Bearer token grants access as the bot-service principal."""
+async def test_valid_service_token_cannot_access_human_viewer_route(monkeypatch):
+    """A valid bot token cannot cross into a human VIEWER route."""
     token = "super-secret-service-token"
     monkeypatch.setattr("app.config.settings.bot_service_token", token)
     monkeypatch.setattr("app.config.settings.auth_disabled", False)
@@ -144,7 +144,7 @@ async def test_valid_service_token_allows_access(monkeypatch):
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-    assert response.status_code == 200
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio

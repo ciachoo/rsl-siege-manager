@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.dependencies.auth import AuthenticatedUser, get_current_user
 from app.main import app
 from app.models.enums import MemberRole
 
@@ -32,6 +33,23 @@ def _make_member(
 @pytest.fixture
 def client():
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+@pytest.fixture(autouse=True)
+def admin_principal():
+    async def override_current_user():
+        return AuthenticatedUser(
+            member_id=None,
+            name="Test Admin",
+            is_service=False,
+            user_account_id=1,
+            app_role="admin",
+            principal_type="human",
+        )
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ---------------------------------------------------------------------------

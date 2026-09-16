@@ -2,13 +2,18 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_manager, require_viewer
 from app.schemas.board import BoardResponse, BulkPositionUpdate, PositionUpdate
 from app.services import board as board_service
 
 router = APIRouter(tags=["board"])
 
 
-@router.get("/sieges/{siege_id}/board", response_model=BoardResponse)
+@router.get(
+    "/sieges/{siege_id}/board",
+    response_model=BoardResponse,
+    dependencies=[Depends(require_viewer)],
+)
 async def get_board(
     siege_id: int,
     db: AsyncSession = Depends(get_db),
@@ -16,7 +21,7 @@ async def get_board(
     return await board_service.get_board(db, siege_id)
 
 
-@router.put("/sieges/{siege_id}/positions/{position_id}")
+@router.put("/sieges/{siege_id}/positions/{position_id}", dependencies=[Depends(require_manager)])
 async def update_position(
     siege_id: int,
     position_id: int,
@@ -34,7 +39,7 @@ async def update_position(
     }
 
 
-@router.post("/sieges/{siege_id}/assignments/bulk")
+@router.post("/sieges/{siege_id}/assignments/bulk", dependencies=[Depends(require_manager)])
 async def bulk_update_positions(
     siege_id: int,
     data: BulkPositionUpdate,

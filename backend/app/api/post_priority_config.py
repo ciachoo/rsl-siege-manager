@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_admin, require_viewer
 from app.models.post_priority_config import PostPriorityConfig
 
 router = APIRouter(tags=["config"])
@@ -22,13 +23,21 @@ class PostPriorityUpdate(BaseModel):
     description: str | None = None
 
 
-@router.get("/post-priorities", response_model=list[PostPriorityResponse])
+@router.get(
+    "/post-priorities",
+    response_model=list[PostPriorityResponse],
+    dependencies=[Depends(require_viewer)],
+)
 async def list_post_priorities(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(PostPriorityConfig).order_by(PostPriorityConfig.post_number))
     return list(result.scalars().all())
 
 
-@router.put("/post-priorities/{post_number}", response_model=PostPriorityResponse)
+@router.put(
+    "/post-priorities/{post_number}",
+    response_model=PostPriorityResponse,
+    dependencies=[Depends(require_admin)],
+)
 async def update_post_priority(
     post_number: int,
     data: PostPriorityUpdate,

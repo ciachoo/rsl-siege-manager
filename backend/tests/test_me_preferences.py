@@ -598,13 +598,13 @@ async def test_post_conditions_open_reference_no_auth():
 
 
 # ---------------------------------------------------------------------------
-# Regression smoke: existing bot calls without X-Acting-Discord-Id still work
+# Principal isolation: bot cannot use ordinary human Manager routes
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_existing_bot_list_members_works_without_acting_header(monkeypatch):
-    """GET /api/members (no /me) still works for the bot without the header."""
+async def test_bot_list_members_is_forbidden_without_human_role(monkeypatch):
+    """The bot contract is limited to /me/preferences, not roster reads."""
     monkeypatch.setattr("app.config.settings.auth_disabled", False)
     monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
 
@@ -630,7 +630,7 @@ async def test_existing_bot_list_members_works_without_acting_header(monkeypatch
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-    assert response.status_code == 200
+    assert response.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -881,332 +881,33 @@ async def test_put_preferences_response_includes_condition_type(
 
 
 # ---------------------------------------------------------------------------
-# Tests (a)–(h): #452 username fallback + opportunistic discord_id backfill
+# Stable Discord-ID identity: username metadata is never authoritative
 # ---------------------------------------------------------------------------
 
 
-def _make_execute_result(rows: list) -> MagicMock:
-    """Build a mock execute() result supporting both scalar styles.
-
-    Args:
-        rows: List of Member-like objects to return from .scalars().all().
-            A single-element list is also available via
-            .scalar_one_or_none() for the snowflake lookup path.
-
-    Returns:
-        A MagicMock whose .scalar_one_or_none() returns the first row
-        (or None) and whose .scalars().all() returns the full list.
-    """
-    result = MagicMock()
-    # scalar_one_or_none used by the snowflake lookup path
-    result.scalar_one_or_none = MagicMock(return_value=rows[0] if rows else None)
-    # scalars().all() used by the username fallback path
-    scalars_mock = MagicMock()
-    scalars_mock.all = MagicMock(return_value=rows)
-    result.scalars = MagicMock(return_value=scalars_mock)
-    return result
-
-
-# (a) snowflake match — regression: existing path still works with username
-# header present but unused
-
-
 @pytest.mark.asyncio
-async def test_username_fallback_a_snowflake_match_returns_member(
+async def test_exact_discord_id_wins_when_username_names_another_member(
     monkeypatch,
     service_token_headers,
 ):
-    """Snowflake lookup hits; username header present but unused."""
+    """The exact snowflake selects the subject; username cannot redirect it."""
     monkeypatch.setattr("app.config.settings.auth_disabled", False)
     monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
 
-    member = _make_member(discord_id=MEMBER_DISCORD_ID)
-    prefs = [_make_post_condition(id=1)]
-
-    # First execute (snowflake lookup) hits; second should never be called.
-    snowflake_result = _make_execute_result([member])
-    mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(return_value=snowflake_result)
-
-    async def override_get_db():
-        yield mock_db
-
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        with patch(
-            "app.api.members.members_service.get_member_preferences",
-            new_callable=AsyncMock,
-        ) as mock_svc:
-            mock_svc.return_value = prefs
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                response = await client.get(
-                    "/api/members/me/preferences",
-                    headers={
-                        **service_token_headers,
-                        "X-Acting-Discord-Id": MEMBER_DISCORD_ID,
-                        "X-Acting-Discord-Username": "alice_discord",
-                    },
-                )
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-
-    assert response.status_code == 200
-
-
-# (b) username fallback match + backfill: discord_id IS NULL, username match
-
-
-@pytest.mark.asyncio
-async def test_username_fallback_b_username_match_backfills_discord_id(
-    monkeypatch,
-    service_token_headers,
-):
-    """Username fallback hits a member with discord_id IS NULL; backfills it."""
-    monkeypatch.setattr("app.config.settings.auth_disabled", False)
-    monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
-
-    # Member has no discord_id yet but has a matching discord_username.
-    member = SimpleNamespace(
-        id=55,
-        name="Bob",
-        discord_id=None,
-        discord_username="bob_discord",
-        role=MemberRole.advanced,
-        power=None,
-        sort_value=None,
-        is_active=True,
-        created_at=datetime.datetime(2026, 1, 1),
-    )
-    prefs = [_make_post_condition(id=3)]
-
-    # Call sequence:
-    # 1. snowflake lookup  → miss (empty)
-    # 2. username lookup   → hit (member)
-    # 3. conflict guard    → miss (no other member owns acting_discord_id)
-    snowflake_miss = _make_execute_result([])
-    username_hit = _make_execute_result([member])
-    conflict_miss = _make_execute_result([])
-
-    mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(side_effect=[snowflake_miss, username_hit, conflict_miss])
-    mock_db.commit = AsyncMock()
-
-    async def override_get_db():
-        yield mock_db
-
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        with patch(
-            "app.api.members.members_service.get_member_preferences",
-            new_callable=AsyncMock,
-        ) as mock_svc:
-            mock_svc.return_value = prefs
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                response = await client.get(
-                    "/api/members/me/preferences",
-                    headers={
-                        **service_token_headers,
-                        "X-Acting-Discord-Id": "555555555555555555",
-                        "X-Acting-Discord-Username": "bob_discord",
-                    },
-                )
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-
-    assert response.status_code == 200
-    # Backfill: discord_id was written onto the member object.
-    assert member.discord_id == "555555555555555555"
-    # commit() must have been called to persist the backfill.
-    mock_db.commit.assert_called_once()
-
-
-# (c) both miss → 404
-
-
-@pytest.mark.asyncio
-async def test_username_fallback_c_both_miss_returns_404(
-    monkeypatch,
-    service_token_headers,
-):
-    """Neither snowflake nor username matches → 404."""
-    monkeypatch.setattr("app.config.settings.auth_disabled", False)
-    monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
-
-    snowflake_miss = _make_execute_result([])
-    username_miss = _make_execute_result([])
-
-    mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(side_effect=[snowflake_miss, username_miss])
-
-    async def override_get_db():
-        yield mock_db
-
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get(
-                "/api/members/me/preferences",
-                headers={
-                    **service_token_headers,
-                    "X-Acting-Discord-Id": "999999999999999999",
-                    "X-Acting-Discord-Username": "nobody_discord",
-                },
-            )
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-
-    assert response.status_code == 404
-
-
-# (d) case-insensitive username match
-
-
-@pytest.mark.asyncio
-async def test_username_fallback_d_case_insensitive_match(
-    monkeypatch,
-    service_token_headers,
-):
-    """Username lookup is case-insensitive; 'Alice_Discord' matches 'alice_discord'."""
-    monkeypatch.setattr("app.config.settings.auth_disabled", False)
-    monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
-
-    member = SimpleNamespace(
-        id=60,
-        name="Alice",
-        discord_id=None,
-        discord_username="alice_discord",
-        role=MemberRole.advanced,
-        power=None,
-        sort_value=None,
-        is_active=True,
-        created_at=datetime.datetime(2026, 1, 1),
-    )
-    prefs = []
-
-    snowflake_miss = _make_execute_result([])
-    username_hit = _make_execute_result([member])
-    conflict_miss = _make_execute_result([])
-
-    mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(side_effect=[snowflake_miss, username_hit, conflict_miss])
-    mock_db.commit = AsyncMock()
-
-    async def override_get_db():
-        yield mock_db
-
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        with patch(
-            "app.api.members.members_service.get_member_preferences",
-            new_callable=AsyncMock,
-        ) as mock_svc:
-            mock_svc.return_value = prefs
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                response = await client.get(
-                    "/api/members/me/preferences",
-                    headers={
-                        **service_token_headers,
-                        "X-Acting-Discord-Id": "600600600600600600",
-                        # Header username has different case than stored value.
-                        "X-Acting-Discord-Username": "ALICE_DISCORD",
-                    },
-                )
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-
-    assert response.status_code == 200
-    assert member.discord_id == "600600600600600600"
-
-
-# (e) backfill idempotency: second call hits snowflake path; no second write
-
-
-@pytest.mark.asyncio
-async def test_username_fallback_e_backfill_idempotency(
-    monkeypatch,
-    service_token_headers,
-):
-    """After backfill, the member now has a discord_id; second call skips fallback."""
-    monkeypatch.setattr("app.config.settings.auth_disabled", False)
-    monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
-
-    # Simulate post-backfill state: member already has discord_id set.
-    member = _make_member(id=70, discord_id="700700700700700700")
-    prefs = []
-
-    # Only one execute call — snowflake hits immediately.
-    snowflake_hit = _make_execute_result([member])
-    mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(return_value=snowflake_hit)
-    mock_db.commit = AsyncMock()
-
-    async def override_get_db():
-        yield mock_db
-
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        with patch(
-            "app.api.members.members_service.get_member_preferences",
-            new_callable=AsyncMock,
-        ) as mock_svc:
-            mock_svc.return_value = prefs
-            async with AsyncClient(
-                transport=ASGITransport(app=app), base_url="http://test"
-            ) as client:
-                response = await client.get(
-                    "/api/members/me/preferences",
-                    headers={
-                        **service_token_headers,
-                        "X-Acting-Discord-Id": "700700700700700700",
-                        "X-Acting-Discord-Username": "eve_discord",
-                    },
-                )
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-
-    assert response.status_code == 200
-    # commit() should NOT be called (no backfill needed).
-    mock_db.commit.assert_not_called()
-    # execute() called exactly once (snowflake path short-circuits).
-    assert mock_db.execute.call_count == 1
-
-
-# (f) snowflake match + stale username header: snowflake wins; no error/rewrite
-
-
-@pytest.mark.asyncio
-async def test_username_fallback_f_snowflake_wins_over_stale_username(
-    monkeypatch,
-    service_token_headers,
-):
-    """Snowflake matches even when username header differs from stored value."""
-    monkeypatch.setattr("app.config.settings.auth_disabled", False)
-    monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
-
-    # Member whose stored discord_username differs from the header value.
-    member = SimpleNamespace(
-        id=80,
-        name="Frank",
+    exact_member = _make_member(
+        id=70,
         discord_id=MEMBER_DISCORD_ID,
-        discord_username="frank_old_handle",
-        role=MemberRole.advanced,
-        power=None,
-        sort_value=None,
-        is_active=True,
-        created_at=datetime.datetime(2026, 1, 1),
+        discord_username="current_exact_user",
     )
-    prefs = []
-
-    # Snowflake hits on first execute; no further executes needed.
-    snowflake_hit = _make_execute_result([member])
+    other_member = _make_member(
+        id=71,
+        discord_id="717171717171717171",
+        discord_username="other_user",
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = exact_member
     mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(return_value=snowflake_hit)
+    mock_db.execute = AsyncMock(return_value=result)
     mock_db.commit = AsyncMock()
 
     async def override_get_db():
@@ -1217,8 +918,8 @@ async def test_username_fallback_f_snowflake_wins_over_stale_username(
         with patch(
             "app.api.members.members_service.get_member_preferences",
             new_callable=AsyncMock,
+            return_value=[],
         ) as mock_svc:
-            mock_svc.return_value = prefs
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
@@ -1227,69 +928,38 @@ async def test_username_fallback_f_snowflake_wins_over_stale_username(
                     headers={
                         **service_token_headers,
                         "X-Acting-Discord-Id": MEMBER_DISCORD_ID,
-                        # Header username drifted from stored value.
-                        "X-Acting-Discord-Username": "frank_new_handle",
+                        "X-Acting-Discord-Username": other_member.discord_username,
                     },
                 )
     finally:
         app.dependency_overrides.pop(get_db, None)
 
     assert response.status_code == 200
-    # discord_username must NOT be rewritten.
-    assert member.discord_username == "frank_old_handle"
-    # No commit (no backfill performed).
+    mock_svc.assert_awaited_once_with(mock_db, exact_member.id)
+    assert exact_member.discord_id == MEMBER_DISCORD_ID
+    assert other_member.discord_id == "717171717171717171"
     mock_db.commit.assert_not_called()
-
-
-# (g) backfill conflict guard: another member already owns the discord_id → 404
+    assert mock_db.execute.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_username_fallback_g_backfill_conflict_returns_404(
+async def test_unknown_discord_id_with_known_username_returns_404_without_backfill(
     monkeypatch,
     service_token_headers,
 ):
-    """Member A has discord_id IS NULL; Member B owns the snowflake → 404, no write."""
+    """A matching username cannot establish a missing stable-ID link."""
     monkeypatch.setattr("app.config.settings.auth_disabled", False)
     monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
 
-    ACTING_SNOWFLAKE = "888888888888888888"
-
-    # Member A: username match candidate, discord_id IS NULL.
-    member_a = SimpleNamespace(
-        id=91,
-        name="Grace",
+    username_member = _make_member(
+        id=80,
         discord_id=None,
-        discord_username="grace_discord",
-        role=MemberRole.advanced,
-        power=None,
-        sort_value=None,
-        is_active=True,
-        created_at=datetime.datetime(2026, 1, 1),
+        discord_username="known_username",
     )
-    # Member B: already owns the acting snowflake (different member).
-    member_b = SimpleNamespace(
-        id=92,
-        name="Henry",
-        discord_id=ACTING_SNOWFLAKE,
-        discord_username="henry_discord",
-        role=MemberRole.advanced,
-        power=None,
-        sort_value=None,
-        is_active=True,
-        created_at=datetime.datetime(2026, 1, 1),
-    )
-
-    # Call sequence:
-    # 1. snowflake lookup  → miss (member A has no discord_id)
-    # 2. username lookup   → hit (member A via username)
-    # 3. conflict guard    → hit (member B owns the snowflake)
-    snowflake_miss = _make_execute_result([])
-    username_hit = _make_execute_result([member_a])
-    conflict_hit = _make_execute_result([member_b])
-
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
     mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(side_effect=[snowflake_miss, username_hit, conflict_hit])
+    mock_db.execute = AsyncMock(return_value=result)
     mock_db.commit = AsyncMock()
 
     async def override_get_db():
@@ -1302,98 +972,25 @@ async def test_username_fallback_g_backfill_conflict_returns_404(
                 "/api/members/me/preferences",
                 headers={
                     **service_token_headers,
-                    "X-Acting-Discord-Id": ACTING_SNOWFLAKE,
-                    "X-Acting-Discord-Username": "grace_discord",
+                    "X-Acting-Discord-Id": "808080808080808080",
+                    "X-Acting-Discord-Username": username_member.discord_username,
                 },
             )
     finally:
         app.dependency_overrides.pop(get_db, None)
 
     assert response.status_code == 404
-    # Member A must NOT have been mutated.
-    assert member_a.discord_id is None
+    assert username_member.discord_id is None
     mock_db.commit.assert_not_called()
-
-
-# (h) multi-row username collision → 409
+    assert mock_db.execute.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_username_fallback_h_multi_row_collision_returns_409(
+async def test_username_without_discord_id_cannot_select_member(
     monkeypatch,
     service_token_headers,
 ):
-    """Two members share a lowercased discord_username → 409 Conflict."""
-    monkeypatch.setattr("app.config.settings.auth_disabled", False)
-    monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
-
-    # Two members with the same lowercased discord_username, both no discord_id.
-    member_x = SimpleNamespace(
-        id=101,
-        name="Xena",
-        discord_id=None,
-        discord_username="duplicate_handle",
-        role=MemberRole.advanced,
-        power=None,
-        sort_value=None,
-        is_active=True,
-        created_at=datetime.datetime(2026, 1, 1),
-    )
-    member_y = SimpleNamespace(
-        id=102,
-        name="Yara",
-        discord_id=None,
-        discord_username="Duplicate_Handle",  # same lowercased value
-        role=MemberRole.advanced,
-        power=None,
-        sort_value=None,
-        is_active=True,
-        created_at=datetime.datetime(2026, 1, 1),
-    )
-
-    snowflake_miss = _make_execute_result([])
-    # Username lookup returns both rows.
-    username_multi = _make_execute_result([member_x, member_y])
-
-    mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(side_effect=[snowflake_miss, username_multi])
-    mock_db.commit = AsyncMock()
-
-    async def override_get_db():
-        yield mock_db
-
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get(
-                "/api/members/me/preferences",
-                headers={
-                    **service_token_headers,
-                    "X-Acting-Discord-Id": "101010101010101010",
-                    "X-Acting-Discord-Username": "duplicate_handle",
-                },
-            )
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-
-    assert response.status_code == 409
-    mock_db.commit.assert_not_called()
-
-
-# (i) X-Acting-Discord-Username too long (>32 chars) → 400
-
-
-@pytest.mark.asyncio
-async def test_username_fallback_i_username_too_long_returns_400(
-    monkeypatch,
-    service_token_headers,
-):
-    """X-Acting-Discord-Username longer than 32 chars → 400 Bad Request.
-
-    Discord caps usernames at 32 characters.  A 33-char value must be
-    rejected before any DB query is attempted.  The snowflake header is
-    present and valid so the only reason for 400 is the length guard.
-    """
+    """Username metadata alone does not provide an acting subject."""
     monkeypatch.setattr("app.config.settings.auth_disabled", False)
     monkeypatch.setattr("app.config.settings.bot_service_token", SERVICE_TOKEN)
 
@@ -1403,20 +1000,18 @@ async def test_username_fallback_i_username_too_long_returns_400(
         yield mock_db
 
     app.dependency_overrides[get_db] = override_get_db
-    # 33 characters — one over the 32-char Discord cap.
-    too_long_username = "a" * 33
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
                 "/api/members/me/preferences",
                 headers={
                     **service_token_headers,
-                    "X-Acting-Discord-Id": MEMBER_DISCORD_ID,
-                    "X-Acting-Discord-Username": too_long_username,
+                    "X-Acting-Discord-Username": "known_username",
                 },
             )
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-    assert response.status_code == 400
-    assert "exceeds maximum length" in response.json()["detail"]
+    assert response.status_code == 401
+    mock_db.execute.assert_not_awaited()
+    mock_db.commit.assert_not_awaited()

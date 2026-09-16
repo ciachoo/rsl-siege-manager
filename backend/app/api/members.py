@@ -2,7 +2,12 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.dependencies.auth import get_acting_member_id
+from app.dependencies.auth import (
+    get_acting_member_id,
+    require_admin,
+    require_bot_service_or_human_viewer,
+    require_viewer,
+)
 from app.schemas.member import (
     MemberCreate,
     MemberPreferencesUpdate,
@@ -15,7 +20,7 @@ from app.services import members as members_service
 router = APIRouter(tags=["members"])
 
 
-@router.get("/members", response_model=list[MemberResponse])
+@router.get("/members", response_model=list[MemberResponse], dependencies=[Depends(require_viewer)])
 async def list_members(
     is_active: bool | None = None,
     db: AsyncSession = Depends(get_db),
@@ -23,7 +28,12 @@ async def list_members(
     return await members_service.list_members(db, is_active)
 
 
-@router.post("/members", response_model=MemberResponse, status_code=201)
+@router.post(
+    "/members",
+    response_model=MemberResponse,
+    status_code=201,
+    dependencies=[Depends(require_admin)],
+)
 async def create_member(
     data: MemberCreate,
     db: AsyncSession = Depends(get_db),
@@ -31,7 +41,11 @@ async def create_member(
     return await members_service.create_member(db, data)
 
 
-@router.get("/members/{member_id}", response_model=MemberResponse)
+@router.get(
+    "/members/{member_id}",
+    response_model=MemberResponse,
+    dependencies=[Depends(require_viewer)],
+)
 async def get_member(
     member_id: int,
     db: AsyncSession = Depends(get_db),
@@ -39,7 +53,11 @@ async def get_member(
     return await members_service.get_member(db, member_id)
 
 
-@router.put("/members/{member_id}", response_model=MemberResponse)
+@router.put(
+    "/members/{member_id}",
+    response_model=MemberResponse,
+    dependencies=[Depends(require_admin)],
+)
 async def update_member(
     member_id: int,
     data: MemberUpdate,
@@ -48,7 +66,7 @@ async def update_member(
     return await members_service.update_member(db, member_id, data)
 
 
-@router.delete("/members/{member_id}", status_code=204)
+@router.delete("/members/{member_id}", status_code=204, dependencies=[Depends(require_admin)])
 async def delete_member(
     member_id: int,
     db: AsyncSession = Depends(get_db),
@@ -57,7 +75,11 @@ async def delete_member(
     return Response(status_code=204)
 
 
-@router.get("/members/me/preferences", response_model=list[PostConditionResponse])
+@router.get(
+    "/members/me/preferences",
+    response_model=list[PostConditionResponse],
+    dependencies=[Depends(require_bot_service_or_human_viewer)],
+)
 async def get_my_preferences(
     member_id: int = Depends(get_acting_member_id),
     db: AsyncSession = Depends(get_db),
@@ -72,7 +94,11 @@ async def get_my_preferences(
     return await members_service.get_member_preferences(db, member_id)
 
 
-@router.put("/members/me/preferences", response_model=list[PostConditionResponse])
+@router.put(
+    "/members/me/preferences",
+    response_model=list[PostConditionResponse],
+    dependencies=[Depends(require_bot_service_or_human_viewer)],
+)
 async def set_my_preferences(
     data: MemberPreferencesUpdate,
     member_id: int = Depends(get_acting_member_id),
@@ -93,7 +119,11 @@ async def set_my_preferences(
     return await members_service.set_member_preferences(db, member_id, data)
 
 
-@router.get("/members/{member_id}/preferences", response_model=list[PostConditionResponse])
+@router.get(
+    "/members/{member_id}/preferences",
+    response_model=list[PostConditionResponse],
+    dependencies=[Depends(require_viewer)],
+)
 async def get_member_preferences(
     member_id: int,
     db: AsyncSession = Depends(get_db),
@@ -101,7 +131,11 @@ async def get_member_preferences(
     return await members_service.get_member_preferences(db, member_id)
 
 
-@router.put("/members/{member_id}/preferences", response_model=list[PostConditionResponse])
+@router.put(
+    "/members/{member_id}/preferences",
+    response_model=list[PostConditionResponse],
+    dependencies=[Depends(require_admin)],
+)
 async def set_member_preferences(
     member_id: int,
     data: MemberPreferencesUpdate,

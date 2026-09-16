@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_db
+from app.dependencies.auth import require_viewer
 from app.models.enums import MemberRole
 from app.models.siege_member import SiegeMember
 from app.services import board as board_service
@@ -27,6 +28,7 @@ class GenerateImagesResponse(BaseModel):
 @router.post(
     "/sieges/{siege_id}/generate-images",
     response_model=GenerateImagesResponse,
+    dependencies=[Depends(require_viewer)],
 )
 async def generate_images(
     siege_id: int,

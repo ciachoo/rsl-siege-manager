@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event, select
@@ -9,16 +10,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
+from app.config import settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models.building import Building
-from app.models.enums import BuildingType
+from app.models.enums import BuildingType, MemberRole
+from app.models.member import Member
 from app.models.post import Post
 from app.models.post_active_condition import post_active_condition
 from app.models.post_condition import PostCondition
 from app.models.scanner import ObservedBuilding, ObservedPost, ScannerIdentity, ScannerSnapshot
 from app.models.siege import Siege
+from app.models.user_account import UserAccount
 from app.schemas.scanner import SnapshotEnvelope
 from app.services.scanner import record_snapshot_with_status
 from app.services.scanner_credentials import (
@@ -138,6 +142,110 @@ async def test_human_bot_and_scanner_credentials_remain_separate(db, monkeypatch
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         assert (
             await client.get("/api/auth/me", headers={"Authorization": f"Bearer {scanner_secret}"})
+        ).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_http_bot_and_scanner_cross_principal_isolation(db, monkeypatch):
+    """Real HTTP requests keep bot, scanner and human role boundaries separate."""
+    _, scanner_secret = await provision_scanner(db, "scanner-one")
+    member = Member(
+        name="Bot Subject",
+        discord_id="123456789012345678",
+        discord_username="bot_subject",
+        role=MemberRole.advanced,
+    )
+    db.add(member)
+    await db.commit()
+
+    monkeypatch.setattr(settings, "auth_disabled", False)
+    monkeypatch.setattr(settings, "bot_service_token", "bot-example")
+    bot_headers = {
+        "Authorization": "Bearer bot-example",
+        "X-Acting-Discord-Id": member.discord_id,
+    }
+    scanner_headers = {"Authorization": f"Bearer {scanner_secret}"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (
+            await client.get("/api/members/me/preferences", headers=bot_headers)
+        ).status_code == 200
+        assert (await client.get("/api/member-roles", headers=bot_headers)).status_code == 403
+        assert (await client.post("/api/sieges/1/activate", headers=bot_headers)).status_code == 403
+        assert (
+            await client.post("/api/members/discord-sync/preview", headers=bot_headers)
+        ).status_code == 403
+        assert (
+            await client.post("/api/scanner/snapshots", json=payload(), headers=bot_headers)
+        ).status_code == 401
+
+        assert (
+            await client.post(
+                "/api/scanner/snapshots",
+                json=payload(snapshot_id="scanner-valid"),
+                headers=scanner_headers,
+            )
+        ).status_code == 201
+        assert (await client.get("/api/member-roles", headers=scanner_headers)).status_code == 401
+        assert (
+            await client.post("/api/sieges/1/activate", headers=scanner_headers)
+        ).status_code == 401
+        assert (
+            await client.post("/api/members/discord-sync/preview", headers=scanner_headers)
+        ).status_code == 401
+        assert (
+            await client.get("/api/members/me/preferences", headers=scanner_headers)
+        ).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_http_human_roles_and_development_cannot_cross_scanner_boundary(db, monkeypatch):
+    """Every human role and the development principal remain outside SCANNER."""
+    monkeypatch.setattr(settings, "auth_disabled", False)
+    monkeypatch.setattr(settings, "session_secret", "test-session-secret")
+    origin = settings.allowed_origins.split(",")[0].strip()
+
+    accounts = []
+    for index, role in enumerate(("viewer", "manager", "admin"), start=1):
+        account = UserAccount(
+            discord_user_id=f"12345678901234567{index}",
+            display_name=role,
+            app_role=role,
+        )
+        db.add(account)
+        accounts.append(account)
+    await db.commit()
+
+    for account in accounts:
+        token = jwt.encode(
+            {
+                "typ": "manager-user-v2",
+                "sub": str(account.id),
+                "iat": datetime.now(UTC),
+                "exp": datetime.now(UTC) + timedelta(hours=1),
+            },
+            settings.session_secret,
+            algorithm="HS256",
+        )
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            client.cookies.set("session", token)
+            response = await client.post(
+                "/api/scanner/snapshots",
+                json=payload(snapshot_id=f"human-{account.app_role}"),
+                headers={"Origin": origin},
+            )
+            assert response.status_code == 401
+
+    monkeypatch.setattr(settings, "auth_disabled", True)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/member-roles")).status_code == 200
+        assert (await client.post("/api/sieges/999/activate")).status_code == 404
+        assert (await client.post("/api/members/discord-sync/preview")).status_code == 403
+        assert (
+            await client.post(
+                "/api/scanner/snapshots",
+                json=payload(snapshot_id="development"),
+            )
         ).status_code == 401
 
 

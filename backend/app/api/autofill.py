@@ -2,13 +2,18 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_manager
 from app.schemas.autofill import AutofillApplyResult, AutofillPreviewResult
 from app.services import autofill as autofill_service
 
 router = APIRouter(tags=["autofill"])
 
 
-@router.post("/sieges/{siege_id}/auto-fill", response_model=AutofillPreviewResult)
+@router.post(
+    "/sieges/{siege_id}/auto-fill",
+    response_model=AutofillPreviewResult,
+    dependencies=[Depends(require_manager)],
+)
 async def preview_autofill(
     siege_id: int,
     db: AsyncSession = Depends(get_db),
@@ -16,7 +21,11 @@ async def preview_autofill(
     return await autofill_service.preview_autofill(db, siege_id)
 
 
-@router.post("/sieges/{siege_id}/auto-fill/apply", response_model=AutofillApplyResult)
+@router.post(
+    "/sieges/{siege_id}/auto-fill/apply",
+    response_model=AutofillApplyResult,
+    dependencies=[Depends(require_manager)],
+)
 async def apply_autofill(
     siege_id: int,
     db: AsyncSession = Depends(get_db),

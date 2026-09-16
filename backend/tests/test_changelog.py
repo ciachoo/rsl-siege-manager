@@ -250,12 +250,12 @@ async def test_post_mark_seen_no_auth_returns_401(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 6. GET status with service Bearer token → 400
+# 6. GET status with service Bearer token → 403
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_get_status_service_token_returns_400(monkeypatch):
+async def test_get_status_service_token_returns_403(monkeypatch):
     """Service principals (Bearer token) cannot use the changelog endpoint."""
     service_token = "super-secret-service-token"
     monkeypatch.setattr("app.config.settings.auth_disabled", False)
@@ -277,5 +277,5 @@ async def test_get_status_service_token_returns_400(monkeypatch):
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-    assert response.status_code == 400
-    assert "endpoint requires a user session" in response.json()["detail"]
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Human account required"

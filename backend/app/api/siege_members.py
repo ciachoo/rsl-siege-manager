@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api._role_sync import schedule_role_sync
 from app.config import settings
 from app.db.session import get_db
+from app.dependencies.auth import require_manager, require_viewer
 from app.schemas.siege_member import (
     MemberPreferenceSummary,
     SiegeMemberResponse,
@@ -38,6 +39,7 @@ class SiegeMemberCreate(BaseModel):
 @router.get(
     "/sieges/{siege_id}/members/preferences",
     response_model=list[MemberPreferenceSummary],
+    dependencies=[Depends(require_viewer)],
 )
 async def get_siege_member_preferences(
     siege_id: int,
@@ -47,7 +49,11 @@ async def get_siege_member_preferences(
     return await siege_members_service.get_siege_member_preferences(db, siege_id)
 
 
-@router.get("/sieges/{siege_id}/members", response_model=list[SiegeMemberResponse])
+@router.get(
+    "/sieges/{siege_id}/members",
+    response_model=list[SiegeMemberResponse],
+    dependencies=[Depends(require_viewer)],
+)
 async def list_siege_members(
     siege_id: int,
     db: AsyncSession = Depends(get_db),
@@ -56,7 +62,12 @@ async def list_siege_members(
     return await siege_members_service.list_siege_members(db, siege_id)
 
 
-@router.post("/sieges/{siege_id}/members", response_model=SiegeMemberResponse, status_code=201)
+@router.post(
+    "/sieges/{siege_id}/members",
+    response_model=SiegeMemberResponse,
+    status_code=201,
+    dependencies=[Depends(require_manager)],
+)
 async def add_siege_member(
     siege_id: int,
     data: SiegeMemberCreate,
@@ -72,7 +83,11 @@ async def add_siege_member(
     return await siege_members_service.add_siege_member(db, siege_id, data.member_id)
 
 
-@router.delete("/sieges/{siege_id}/members/{member_id}", status_code=204)
+@router.delete(
+    "/sieges/{siege_id}/members/{member_id}",
+    status_code=204,
+    dependencies=[Depends(require_manager)],
+)
 async def remove_siege_member(
     siege_id: int,
     member_id: int,
@@ -110,7 +125,11 @@ async def remove_siege_member(
         )
 
 
-@router.put("/sieges/{siege_id}/members/{member_id}", response_model=SiegeMemberResponse)
+@router.put(
+    "/sieges/{siege_id}/members/{member_id}",
+    response_model=SiegeMemberResponse,
+    dependencies=[Depends(require_manager)],
+)
 async def update_siege_member(
     siege_id: int,
     member_id: int,

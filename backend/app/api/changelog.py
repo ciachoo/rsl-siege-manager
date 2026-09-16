@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.dependencies.auth import AuthenticatedUser, get_current_user
+from app.dependencies.auth import AuthenticatedUser, require_viewer
 from app.models.member import Member
 from app.schemas.changelog import ChangelogStatusResponse
 
@@ -43,7 +43,7 @@ def _require_member_session(current_user: AuthenticatedUser) -> None:
 
 @router.get("/changelog/status", response_model=ChangelogStatusResponse)
 async def get_changelog_status(
-    current_user: AuthenticatedUser = Depends(get_current_user),
+    current_user: AuthenticatedUser = Depends(require_viewer),
     db: AsyncSession = Depends(get_db),
 ) -> ChangelogStatusResponse:
     """Return the authenticated user's last-seen changelog timestamp.
@@ -69,7 +69,7 @@ async def get_changelog_status(
 
 @router.post("/changelog/mark-seen", response_model=ChangelogStatusResponse)
 async def mark_changelog_seen(
-    current_user: AuthenticatedUser = Depends(get_current_user),
+    current_user: AuthenticatedUser = Depends(require_viewer),
     db: AsyncSession = Depends(get_db),
 ) -> ChangelogStatusResponse:
     """Set the authenticated user's last-seen changelog timestamp to now.

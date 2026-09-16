@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_viewer
 from app.models.siege import Siege
 from app.schemas.comparison import ComparisonResult
 from app.services import comparison as comparison_service
@@ -10,7 +11,11 @@ from app.services import comparison as comparison_service
 router = APIRouter(tags=["comparison"])
 
 
-@router.get("/sieges/{siege_id}/compare", response_model=ComparisonResult)
+@router.get(
+    "/sieges/{siege_id}/compare",
+    response_model=ComparisonResult,
+    dependencies=[Depends(require_viewer)],
+)
 async def compare_with_most_recent(
     siege_id: int,
     db: AsyncSession = Depends(get_db),
@@ -27,7 +32,11 @@ async def compare_with_most_recent(
     return await comparison_service.compare_sieges(db, other.id, siege_id)
 
 
-@router.get("/sieges/{siege_id}/compare/{other_id}", response_model=ComparisonResult)
+@router.get(
+    "/sieges/{siege_id}/compare/{other_id}",
+    response_model=ComparisonResult,
+    dependencies=[Depends(require_viewer)],
+)
 async def compare_with_specific(
     siege_id: int,
     other_id: int,

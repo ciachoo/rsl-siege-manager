@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_viewer
 from app.models.siege import Siege
 from app.schemas.validation import ValidationResult
 from app.services import validation as validation_service
@@ -10,7 +11,11 @@ from app.services import validation as validation_service
 router = APIRouter(tags=["validation"])
 
 
-@router.post("/sieges/{siege_id}/validate", response_model=ValidationResult)
+@router.post(
+    "/sieges/{siege_id}/validate",
+    response_model=ValidationResult,
+    dependencies=[Depends(require_viewer)],
+)
 async def validate_siege(
     siege_id: int,
     db: AsyncSession = Depends(get_db),

@@ -4,13 +4,18 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.dependencies.auth import require_admin
 from app.schemas.member import SyncApply, SyncApplyResponse, SyncPreviewResponse
 from app.services import discord_sync as discord_sync_service
 
 router = APIRouter(tags=["discord-sync"])
 
 
-@router.post("/members/discord-sync/preview", response_model=SyncPreviewResponse)
+@router.post(
+    "/members/discord-sync/preview",
+    response_model=SyncPreviewResponse,
+    dependencies=[Depends(require_admin)],
+)
 async def preview_discord_sync(
     db: AsyncSession = Depends(get_db),
 ) -> SyncPreviewResponse:
@@ -18,7 +23,11 @@ async def preview_discord_sync(
     return await discord_sync_service.preview_discord_sync(db)
 
 
-@router.post("/members/discord-sync/apply", response_model=SyncApplyResponse)
+@router.post(
+    "/members/discord-sync/apply",
+    response_model=SyncApplyResponse,
+    dependencies=[Depends(require_admin)],
+)
 async def apply_discord_sync(
     items: list[SyncApply],
     db: AsyncSession = Depends(get_db),

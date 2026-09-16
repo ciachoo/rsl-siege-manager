@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api._role_sync import schedule_role_sync
 from app.config import settings
 from app.db.session import get_db
+from app.dependencies.auth import require_manager
 from app.schemas.attack_day import AttackDayApplyResult, AttackDayPreviewResult
 from app.services import attack_day as attack_day_service
 
@@ -55,6 +56,7 @@ def _role_id_for_day(day: int | None) -> int | None:
 @router.post(
     "/sieges/{siege_id}/members/auto-assign-attack-day",
     response_model=AttackDayPreviewResult,
+    dependencies=[Depends(require_manager)],
 )
 async def preview_attack_day(
     siege_id: int,
@@ -68,6 +70,7 @@ async def preview_attack_day(
     "/sieges/{siege_id}/members/auto-assign-attack-day/apply",
     response_model=AttackDayApplyResult,
     response_model_exclude={"applied_members"},
+    dependencies=[Depends(require_manager)],
 )
 async def apply_attack_day(
     siege_id: int,
