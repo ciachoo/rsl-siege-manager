@@ -1,6 +1,6 @@
 # Manager Task #5C — audyt autoryzacji API
 
-Podstawa: checkpoint #5C oraz rozszerzenia Task #6 i #8, 2026-09-16. Inwentaryzacja obejmuje wszystkie 73 trasy aplikacyjne FastAPI zarejestrowane przez `backend/app/main.py`. Trasy dokumentacji OpenAPI istnieją tylko w development i są opisane osobno.
+Podstawa: checkpoint #5C oraz rozszerzenia Task #6, #8 i #9, 2026-09-16. Inwentaryzacja obejmuje wszystkie 74 trasy aplikacyjne FastAPI zarejestrowane przez `backend/app/main.py`. Trasy dokumentacji OpenAPI istnieją tylko w development i są opisane osobno.
 
 ## Zasady klasyfikacji
 
@@ -33,6 +33,7 @@ Podstawa: checkpoint #5C oraz rozszerzenia Task #6 i #8, 2026-09-16. Inwentaryza
 | GET `/api/scanner-observations/snapshots` | `api/scanner_observations.py::list_snapshots` | paginowana lista metadata evidence | `require_viewer` | HUMAN_VIEWER |
 | GET `/api/scanner-observations/snapshots/latest` | `api/scanner_observations.py::get_latest_snapshot` | deterministycznie najnowsze evidence | `require_viewer` | HUMAN_VIEWER |
 | GET `/api/scanner-observations/snapshots/{snapshot_db_id}` | `api/scanner_observations.py::get_snapshot_detail` | snapshot i observed children | `require_viewer` | HUMAN_VIEWER |
+| GET `/api/sieges/{siege_id}/scanner-evidence` | `api/siege_scanner_evidence.py::get_siege_scanner_evidence` | latest matched Scanner evidence dla Siege | `require_viewer` | HUMAN_VIEWER |
 | GET `/api/post-conditions` | `api/reference.py::get_post_conditions` | odczyt katalogu używanego przez UI i `rsl-mom-bot` | router `get_current_user` | HUMAN_VIEWER lub BOT_SERVICE |
 | GET `/api/building-types` | `api/reference.py::get_building_types` | odczyt katalogu | router `get_current_user` | HUMAN_VIEWER |
 | GET `/api/member-roles` | `api/reference.py::get_member_roles` | odczyt katalogu | router `get_current_user` | HUMAN_VIEWER |
@@ -110,7 +111,7 @@ Development dodaje frameworkowe `GET /openapi.json`, `GET /api/docs` i `GET /doc
 
 ## Stan implementacji Task #5C
 
-Każda z 73 tras produktu ma teraz jawnie przypisaną granicę autoryzacji zgodną z macierzą powyżej. Trasy ludzkie korzystają z centralnych zależności `require_viewer`, `require_manager` albo `require_admin`. `/api/auth/me` wymaga człowieka z rolą VIEWER lub wyższą. Trasy odczytu Managera nie przyjmują tokenu bota ani poświadczenia skanera, a mutacje planowania wymagają MANAGER. Globalne operacje na Memberach, synchronizacja tożsamości Discord i zmiana globalnego katalogu priorytetów wymagają ADMIN.
+Każda z 74 tras produktu ma teraz jawnie przypisaną granicę autoryzacji zgodną z macierzą powyżej. Trasy ludzkie korzystają z centralnych zależności `require_viewer`, `require_manager` albo `require_admin`. `/api/auth/me` wymaga człowieka z rolą VIEWER lub wyższą. Trasy odczytu Managera nie przyjmują tokenu bota ani poświadczenia skanera, a mutacje planowania wymagają MANAGER. Globalne operacje na Memberach, synchronizacja tożsamości Discord i zmiana globalnego katalogu priorytetów wymagają ADMIN.
 
 Kontrakt `GET /api/post-conditions` dopuszcza HUMAN_VIEWER lub wyższą rolę oraz zaufany BOT_SERVICE przez wąską zależność `require_bot_service_or_human_viewer`. Nie rozszerza dostępu bota do `/api/building-types`, `/api/member-roles` ani innych tras VIEWER. Skaner pozostaje odrzucony.
 
@@ -122,7 +123,7 @@ Bypass `AUTH_DISABLED` pozostaje development-only i przechodzi wymagania VIEWER/
 
 ## Testy implementacji
 
-Dodano regresyjny test kompletności macierzy, który enumeruje wszystkie 73 trasy i wykrywa brak trasy, nową niesklasyfikowaną trasę albo niewłaściwą zależność. Macierz principal obejmuje anonimowego użytkownika, VIEWER, MANAGER, ADMIN, development stub, skaner i bot service. Testy wykonujące rzeczywiste żądania HTTP potwierdzają obustronną izolację tras HUMAN_VIEWER/HUMAN_MANAGER/HUMAN_ADMIN, SCANNER i kontraktu BOT_SERVICE. Obejmują również development stub oraz stabilne rozwiązywanie Membera wyłącznie po Discord ID: zmiana username nie zmienia podmiotu, a nieznany ID z pasującą nazwą zwraca 404 bez zapisu. Istniejące testy bota, changelogu, Memberów i Discord sync zaktualizowano do nowych granic bez zmiany zachowania domenowego.
+Dodano regresyjny test kompletności macierzy, który enumeruje wszystkie 74 trasy i wykrywa brak trasy, nową niesklasyfikowaną trasę albo niewłaściwą zależność. Macierz principal obejmuje anonimowego użytkownika, VIEWER, MANAGER, ADMIN, development stub, skaner i bot service. Testy wykonujące rzeczywiste żądania HTTP potwierdzają obustronną izolację tras HUMAN_VIEWER/HUMAN_MANAGER/HUMAN_ADMIN, SCANNER i kontraktu BOT_SERVICE. Obejmują również development stub oraz stabilne rozwiązywanie Membera wyłącznie po Discord ID: zmiana username nie zmienia podmiotu, a nieznany ID z pasującą nazwą zwraca 404 bez zapisu. Istniejące testy bota, changelogu, Memberów i Discord sync zaktualizowano do nowych granic bez zmiany zachowania domenowego.
 
 Wyniki końcowe:
 
@@ -158,6 +159,14 @@ Trzy trasy `/api/scanner-observations/snapshots*` są read-only i wymagają `req
 LIST używa bounded `limit/offset`, opcjonalnych dokładnych filtrów `scanner_id`, `siege_id` i `association_status` oraz kolejności `observed_at DESC, id DESC`; nie ładuje children. LATEST ma tę samą semantykę filtrowania i kolejności. DETAIL ładuje Buildings i Posts przez dwa zbiorcze `selectinload`, zachowuje flagi presence i nullable UNKNOWN, deterministycznie porządkuje children i nie sortuje `modifier_ids`. Endpointy nie wykonują flush ani commit i nie zmieniają evidence ani planned state.
 
 Walidacja Task #8: **7 passed** w testach skupionych, **25 passed** w guardrailu authorization matrix, **30 passed** w zestawie Scanner observations/ingestion/admin, **118 passed** w zestawie auth/RBAC/scanner/bootstrap/migration/schema oraz **572 passed** w praktycznym pełnym backendzie. Ruff, Black i `git diff --check` przeszły.
+
+## Task #9 — Siege Scanner evidence projection
+
+`GET /api/sieges/{siege_id}/scanner-evidence` jest read-only trasą HUMAN_VIEWER chronioną przez `require_viewer`. Wybiera wyłącznie snapshoty z jawnym `ScannerSnapshot.siege_id == requested siege_id`, według `observed_at DESC, id DESC`, bez scalania wielu Scannerów i bez filtrowania po aktualnym stanie credentialu. Odpowiedź jawnie wskazuje source snapshot i nie zawiera credential metadata ani digestu.
+
+Istniejący Siege bez evidence zwraca 200 z `has_evidence=false`, `source_snapshot=null` i nullable presence, co pozostaje odrębne od source snapshotu z kategorią niezaobserwowaną. Projection zwraca surowe external IDs i nie wykonuje mapowania lub mutacji planned Buildings, Posts, conditions, lifecycle ani assignments.
+
+Walidacja Task #9: **6 passed** w testach skupionych, **25 passed** w guardrailu authorization matrix, **36 passed** w pełnym obszarze Scanner #7–#9, **124 passed** w zestawie auth/RBAC/scanner/bootstrap/migration/schema oraz **578 passed** w praktycznym pełnym backendzie. Ruff, Black i `git diff --check` przeszły.
 
 Walidacja #5C.1:
 
