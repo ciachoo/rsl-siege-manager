@@ -61,4 +61,15 @@ export const handlers = [
     HttpResponse.json(buildingTypes)
   ),
   http.get("/api/post-conditions", () => HttpResponse.json([])),
+  http.get("/api/sieges/:siegeId/scanner-evidence", ({ params }) =>
+    HttpResponse.json({
+      siege_id: Number(params.siegeId),
+      has_evidence: false,
+      source_snapshot: null,
+      buildings_present: null,
+      posts_present: null,
+      buildings: [],
+      posts: [],
+    })
+  ),
 ];

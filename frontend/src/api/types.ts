@@ -299,3 +299,36 @@ export interface PostSuggestionStaleEntry {
 export interface PostSuggestionApplyResult {
   applied_count: number;
 }
+
+// Scanner evidence projection
+export interface SiegeEvidenceSourceSnapshot {
+  id: number;
+  snapshot_id: string;
+  scanner_id: string;
+  scanner_version: string;
+  schema_version: number;
+  observed_at: string;
+  received_at: string;
+  cycle_ref: string | null;
+}
+
+export interface ObservedBuilding {
+  external_building_id: string;
+  level: number | null;
+  is_broken: boolean | null;
+}
+
+export interface ObservedPost {
+  external_post_id: string;
+  modifier_ids: string[] | null;
+}
+
+export interface SiegeScannerEvidenceResponse {
+  siege_id: number;
+  has_evidence: boolean;
+  source_snapshot: SiegeEvidenceSourceSnapshot | null;
+  buildings_present: boolean | null;
+  posts_present: boolean | null;
+  buildings: ObservedBuilding[];
+  posts: ObservedPost[];
+}

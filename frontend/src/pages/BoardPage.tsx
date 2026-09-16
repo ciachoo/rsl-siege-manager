@@ -23,6 +23,7 @@ import {
 } from "../api/sieges";
 import { getPostPriorities } from "../api/posts";
 import { PostsTab } from "../components/PostsTab";
+import { ScannerEvidencePanel } from "../components/ScannerEvidencePanel";
 import type {
   BuildingType,
   BuildingResponse,
@@ -998,6 +999,8 @@ export default function BoardPage() {
           </span>
         )}
       </div>
+
+      <ScannerEvidencePanel siegeId={siegeId} />
 
       {/* ── Main two-column layout ── */}
       {/* DndContext is only active on the buildings tab */}
