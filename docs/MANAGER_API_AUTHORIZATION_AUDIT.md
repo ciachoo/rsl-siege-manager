@@ -1,6 +1,6 @@
 # Manager Task #5C — audyt autoryzacji API
 
-Podstawa: czysty checkpoint `164c33882e30a3e898c805195cadb7f826dec0cf`, 2026-09-16. Dokument powstał przed zmianami implementacyjnymi #5C. Inwentaryzacja obejmuje wszystkie 65 tras aplikacyjnych FastAPI zarejestrowanych przez `backend/app/main.py`. Trasy dokumentacji OpenAPI istnieją tylko w development i są opisane osobno.
+Podstawa: checkpoint #5C oraz rozszerzenie Task #6, 2026-09-16. Inwentaryzacja obejmuje wszystkie 70 tras aplikacyjnych FastAPI zarejestrowanych przez `backend/app/main.py`. Trasy dokumentacji OpenAPI istnieją tylko w development i są opisane osobno.
 
 ## Zasady klasyfikacji
 
@@ -25,6 +25,11 @@ Podstawa: czysty checkpoint `164c33882e30a3e898c805195cadb7f826dec0cf`, 2026-09-
 | POST `/api/auth/logout` | `api/auth.py::logout` | usunięcie ciasteczka | brak | PUBLIC |
 | GET `/api/auth/me` | `api/auth.py::me` | odczyt własnej tożsamości | `get_current_user` | HUMAN_VIEWER |
 | POST `/api/scanner/snapshots` | `api/scanner.py::ingest_snapshot` | zapis snapshotu | `get_authenticated_scanner` | SCANNER |
+| POST `/api/scanners` | `api/scanner_admin.py::create_scanner` | provisioning identity i jednorazowego credentialu | `require_admin` | HUMAN_ADMIN |
+| GET `/api/scanners` | `api/scanner_admin.py::get_scanners` | bezpieczna lista Scannerów | `require_admin` | HUMAN_ADMIN |
+| GET `/api/scanners/{scanner_id}` | `api/scanner_admin.py::get_scanner` | bezpieczne metadata Scannera | `require_admin` | HUMAN_ADMIN |
+| POST `/api/scanners/{scanner_id}/rotate-credential` | `api/scanner_admin.py::rotate_scanner` | natychmiastowa rotacja credentialu | `require_admin` | HUMAN_ADMIN |
+| POST `/api/scanners/{scanner_id}/revoke` | `api/scanner_admin.py::revoke_scanner_credential` | idempotentne unieważnienie credentialu | `require_admin` | HUMAN_ADMIN |
 | GET `/api/post-conditions` | `api/reference.py::get_post_conditions` | odczyt katalogu używanego przez UI i `rsl-mom-bot` | router `get_current_user` | HUMAN_VIEWER lub BOT_SERVICE |
 | GET `/api/building-types` | `api/reference.py::get_building_types` | odczyt katalogu | router `get_current_user` | HUMAN_VIEWER |
 | GET `/api/member-roles` | `api/reference.py::get_member_roles` | odczyt katalogu | router `get_current_user` | HUMAN_VIEWER |
@@ -102,7 +107,7 @@ Development dodaje frameworkowe `GET /openapi.json`, `GET /api/docs` i `GET /doc
 
 ## Stan implementacji Task #5C
 
-Każda z 65 tras produktu ma teraz jawnie przypisaną granicę autoryzacji zgodną z macierzą powyżej. Trasy ludzkie korzystają z centralnych zależności `require_viewer`, `require_manager` albo `require_admin`. `/api/auth/me` wymaga człowieka z rolą VIEWER lub wyższą. Trasy odczytu Managera nie przyjmują tokenu bota ani poświadczenia skanera, a mutacje planowania wymagają MANAGER. Globalne operacje na Memberach, synchronizacja tożsamości Discord i zmiana globalnego katalogu priorytetów wymagają ADMIN.
+Każda z 70 tras produktu ma teraz jawnie przypisaną granicę autoryzacji zgodną z macierzą powyżej. Trasy ludzkie korzystają z centralnych zależności `require_viewer`, `require_manager` albo `require_admin`. `/api/auth/me` wymaga człowieka z rolą VIEWER lub wyższą. Trasy odczytu Managera nie przyjmują tokenu bota ani poświadczenia skanera, a mutacje planowania wymagają MANAGER. Globalne operacje na Memberach, synchronizacja tożsamości Discord i zmiana globalnego katalogu priorytetów wymagają ADMIN.
 
 Kontrakt `GET /api/post-conditions` dopuszcza HUMAN_VIEWER lub wyższą rolę oraz zaufany BOT_SERVICE przez wąską zależność `require_bot_service_or_human_viewer`. Nie rozszerza dostępu bota do `/api/building-types`, `/api/member-roles` ani innych tras VIEWER. Skaner pozostaje odrzucony.
 
@@ -114,7 +119,7 @@ Bypass `AUTH_DISABLED` pozostaje development-only i przechodzi wymagania VIEWER/
 
 ## Testy implementacji
 
-Dodano regresyjny test kompletności macierzy, który enumeruje wszystkie 65 tras i wykrywa brak trasy, nową niesklasyfikowaną trasę albo niewłaściwą zależność. Macierz principal obejmuje anonimowego użytkownika, VIEWER, MANAGER, ADMIN, development stub, skaner i bot service. Testy wykonujące rzeczywiste żądania HTTP potwierdzają obustronną izolację tras HUMAN_VIEWER/HUMAN_MANAGER/HUMAN_ADMIN, SCANNER i kontraktu BOT_SERVICE. Obejmują również development stub oraz stabilne rozwiązywanie Membera wyłącznie po Discord ID: zmiana username nie zmienia podmiotu, a nieznany ID z pasującą nazwą zwraca 404 bez zapisu. Istniejące testy bota, changelogu, Memberów i Discord sync zaktualizowano do nowych granic bez zmiany zachowania domenowego.
+Dodano regresyjny test kompletności macierzy, który enumeruje wszystkie 70 tras i wykrywa brak trasy, nową niesklasyfikowaną trasę albo niewłaściwą zależność. Macierz principal obejmuje anonimowego użytkownika, VIEWER, MANAGER, ADMIN, development stub, skaner i bot service. Testy wykonujące rzeczywiste żądania HTTP potwierdzają obustronną izolację tras HUMAN_VIEWER/HUMAN_MANAGER/HUMAN_ADMIN, SCANNER i kontraktu BOT_SERVICE. Obejmują również development stub oraz stabilne rozwiązywanie Membera wyłącznie po Discord ID: zmiana username nie zmienia podmiotu, a nieznany ID z pasującą nazwą zwraca 404 bez zapisu. Istniejące testy bota, changelogu, Memberów i Discord sync zaktualizowano do nowych granic bez zmiany zachowania domenowego.
 
 Wyniki końcowe:
 
@@ -125,7 +130,19 @@ Wyniki końcowe:
 - Black dla zmienionych plików oraz kontrola całego `app` i `tests`: zaliczone;
 - `git diff --check`: zaliczony.
 
-Frontend nie został zmieniony: istniejąca obsługa 403 nadal pokazuje komunikat o braku uprawnień. Task #5C dotyczy granic API, dlatego nie uruchamiano zestawu frontendowego. Nie pozostała nierozstrzygnięta trasa ani blocker implementacyjny. Provisioning skanera pozostaje poza zakresem do Task #6.
+Frontend nie został zmieniony: istniejąca obsługa 403 nadal pokazuje komunikat o braku uprawnień. Task #5C dotyczy granic API, dlatego nie uruchamiano zestawu frontendowego. Nie pozostała nierozstrzygnięta trasa ani blocker implementacyjny. Provisioning skanera pozostawał poza zakresem Task #5C i został dodany w Task #6 poniżej.
+
+## Task #6 — administracyjne zarządzanie Scannerami
+
+Trasy `/api/scanners*` wymagają prawdziwego HUMAN_ADMIN przez `require_admin`. VIEWER, MANAGER, BOT_SERVICE, SCANNER, użytkownik anonimowy i development stub są odrzucani. Istniejące `POST /api/scanner/snapshots` pozostaje wyłącznie SCANNER i nie przyjmuje sesji ADMIN.
+
+Provisioning wykorzystuje istniejący format `ssm_scanner_<selector>.<secret>` oraz istniejący SHA-256 verifier porównywany przez `secrets.compare_digest`. Baza przechowuje stabilne `ScannerIdentity.id`, selector, verifier i daty utworzenia/unieważnienia. Plaintext jest zwracany tylko przez create albo rotate; list/detail/revoke nie zawierają plaintextu, selectora ani verifiera. Rotate zachowuje identity i natychmiast zastępuje credential. Revoke zachowuje identity, snapshoty i obserwacje, a ponowne revoke zachowuje pierwszy czas unieważnienia.
+
+Klucz główny identity chroni także przed wyścigiem dwóch żądań create: konflikt bazy jest wycofywany i mapowany na kontrolowane HTTP 409, bez zwrócenia wygenerowanego credentialu. Rotacja zapisuje nowy selector, verifier i wyczyszczenie revoke w jednym commicie. Równoległe rotacje mają świadomą semantykę „ostatni zatwierdzony zapis wygrywa”; nie tworzą dwóch aktywnych credentiali ani stanu częściowego.
+
+Nie dodano migracji: tabela z rewizji 0014 wystarcza. `last_seen_at`, heartbeat, lease i Fleet Management pozostają poza zakresem do Task #7.
+
+Walidacja Task #6 po przeglądzie przed commitem: **40 passed** w testach skupionych, **109 passed** w zestawie auth/RBAC/scanner/bootstrap/migration/schema oraz **563 passed** w praktycznym pełnym backendzie. Ruff, Black i `git diff --check` przeszły.
 
 ## Uzupełnienie Task #5C.1 — zgodność katalogu Post Conditions
 

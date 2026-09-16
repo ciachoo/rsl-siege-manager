@@ -29,6 +29,11 @@ DUAL_BOT_VIEWER = {
     ("PUT", "/api/members/me/preferences"),
 }
 ADMIN = {
+    ("POST", "/api/scanners"),
+    ("GET", "/api/scanners"),
+    ("GET", "/api/scanners/{scanner_id}"),
+    ("POST", "/api/scanners/{scanner_id}/rotate-credential"),
+    ("POST", "/api/scanners/{scanner_id}/revoke"),
     ("POST", "/api/members/discord-sync/preview"),
     ("POST", "/api/members/discord-sync/apply"),
     ("POST", "/api/members"),
@@ -111,7 +116,7 @@ def test_all_application_routes_have_the_classified_authorization_dependency():
     routes = dict(_application_routes())
     expected = PUBLIC | SCANNER | DUAL_BOT_VIEWER | VIEWER | MANAGER | ADMIN
 
-    assert len(routes) == 65
+    assert len(routes) == 70
     assert set(routes) == expected
 
     for key, dependencies in routes.items():

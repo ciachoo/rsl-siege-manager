@@ -56,9 +56,20 @@ async def revoke_scanner(session: AsyncSession, scanner_id: str) -> bool:
     scanner = await session.get(ScannerIdentity, scanner_id)
     if scanner is None:
         return False
+    if scanner.credential_revoked_at is not None:
+        return True
     scanner.credential_revoked_at = datetime.now(UTC)
     await session.commit()
     return True
+
+
+async def list_scanners(session: AsyncSession) -> list[ScannerIdentity]:
+    """Return stable Scanner identities without exposing credential verifiers."""
+    return list(
+        (await session.execute(select(ScannerIdentity).order_by(ScannerIdentity.id)))
+        .scalars()
+        .all()
+    )
 
 
 async def authenticate_scanner(session: AsyncSession, credential: str) -> ScannerIdentity | None:
